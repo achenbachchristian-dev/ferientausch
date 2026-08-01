@@ -1,0 +1,1189 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  Bath,
+  BedDouble,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Home,
+  ImagePlus,
+  LogOut,
+  Mail,
+  MapPin,
+  Plus,
+  Search,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
+import {
+  auth,
+  createUserWithEmailAndPassword,
+  firebaseEnabled,
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithEmailAndPassword,
+  signOut,
+} from "./lib/firebase";
+import { amenityOptions } from "./lib/demoData";
+import { findMatches, formatDateRange } from "./lib/matching";
+import {
+  createId,
+  loadLocalState,
+  patchRecord,
+  removeRecord,
+  saveLocalState,
+  saveRecord,
+  subscribeCollection,
+} from "./lib/store";
+
+const tabs = [
+  { id: "discover", label: "Entdecken", icon: Search },
+  { id: "my-home", label: "Mein Haus", icon: Home },
+  { id: "calendar", label: "Kalender", icon: CalendarDays },
+  { id: "matcher", label: "Smart Matcher", icon: Sparkles },
+  { id: "requests", label: "Anfragen", icon: Mail },
+  { id: "profile", label: "Profil", icon: Users },
+];
+
+const blankHouse = {
+  title: "",
+  city: "",
+  address: "",
+  maxGuests: 4,
+  bedrooms: 2,
+  bathrooms: 1,
+  description: "",
+  amenities: ["WLAN", "Kinderfreundlich"],
+  photos: [],
+  isExternal: false,
+};
+
+const blankAvailability = {
+  title: "",
+  homeId: "",
+  start: "",
+  end: "",
+};
+
+const statusLabels = {
+  pending: "Offen",
+  accepted: "Angenommen",
+  declined: "Abgelehnt",
+};
+
+const emptyState = {
+  profiles: [],
+  homes: [],
+  availabilities: [],
+  requests: [],
+};
+
+function App() {
+  const [state, setState] = useState(() => (firebaseEnabled ? emptyState : loadLocalState()));
+  const [currentUserId, setCurrentUserId] = useState(() => window.localStorage.getItem("ferientausch-current-user"));
+  const [activeTab, setActiveTab] = useState("discover");
+  const [authMode, setAuthMode] = useState("login");
+  const [requestDraft, setRequestDraft] = useState(null);
+  const [query, setQuery] = useState("");
+  const [minGuests, setMinGuests] = useState("");
+  const [travelStart, setTravelStart] = useState("");
+  const [travelEnd, setTravelEnd] = useState("");
+
+  useEffect(() => {
+    if (!firebaseEnabled) {
+      return;
+    }
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      setCurrentUserId(firebaseUser?.uid ?? null);
+      if (firebaseUser?.uid) {
+        window.localStorage.setItem("ferientausch-current-user", firebaseUser.uid);
+      }
+    });
+
+    const unsubscribers = [
+      subscribeCollection("profiles", (profiles) => setState((current) => ({ ...current, profiles }))),
+      subscribeCollection("homes", (homes) => setState((current) => ({ ...current, homes }))),
+      subscribeCollection("availabilities", (availabilities) => setState((current) => ({ ...current, availabilities }))),
+      subscribeCollection("exchangeRequests", (requests) => setState((current) => ({ ...current, requests }))),
+    ];
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, []);
+
+  const currentProfile = useMemo(
+    () => state.profiles.find((profile) => profile.id === currentUserId),
+    [currentUserId, state.profiles],
+  );
+
+  const ownedHomes = useMemo(() => {
+    if (!currentProfile) {
+      return [];
+    }
+
+    return state.homes.filter((home) => home.ownerId === currentProfile.id || home.managedBy === currentProfile.id);
+  }, [currentProfile, state.homes]);
+
+  const matches = useMemo(() => {
+    if (!currentProfile) {
+      return [];
+    }
+
+    return findMatches(state.availabilities, state.homes, currentProfile.id);
+  }, [currentProfile, state.availabilities, state.homes]);
+
+  const filteredHomes = useMemo(() => {
+    return state.homes.filter((home) => {
+      const textMatch = `${home.title} ${home.city} ${home.address} ${home.description}`
+        .toLowerCase()
+        .includes(query.toLowerCase());
+      const guestMatch = !minGuests || Number(home.maxGuests) >= Number(minGuests);
+      const dateMatch =
+        !travelStart ||
+        !travelEnd ||
+        state.availabilities.some(
+          (availability) =>
+            availability.homeId === home.id && availability.start <= travelEnd && availability.end >= travelStart,
+        );
+
+      return textMatch && guestMatch && dateMatch;
+    });
+  }, [minGuests, query, state.availabilities, state.homes, travelEnd, travelStart]);
+
+  function updateState(updater) {
+    setState((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      if (!firebaseEnabled) {
+        saveLocalState(next);
+      }
+      return next;
+    });
+  }
+
+  async function handleAuthSubmit(event, form) {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const password = String(formData.get("password") ?? "");
+    const familyName = String(formData.get("familyName") ?? "").trim();
+    const city = String(formData.get("city") ?? "").trim();
+
+    if (firebaseEnabled) {
+      if (authMode === "register") {
+        const credentials = await createUserWithEmailAndPassword(auth, email, password);
+        const profile = {
+          id: credentials.user.uid,
+          familyName,
+          city,
+          email,
+          description: "Neu im FerienTausch.",
+          isAdmin: state.profiles.length === 0,
+        };
+        await saveRecord("profiles", profile);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+      return;
+    }
+
+    if (authMode === "register") {
+      const profile = {
+        id: createId("family"),
+        familyName,
+        city,
+        email,
+        description: "Neu im FerienTausch.",
+        isAdmin: state.profiles.length === 0,
+      };
+      updateState((current) => ({ ...current, profiles: [...current.profiles, profile] }));
+      setCurrentUserId(profile.id);
+      window.localStorage.setItem("ferientausch-current-user", profile.id);
+      return;
+    }
+
+    const profile = state.profiles.find((entry) => entry.email.toLowerCase() === email) ?? state.profiles[0];
+    setCurrentUserId(profile.id);
+    window.localStorage.setItem("ferientausch-current-user", profile.id);
+  }
+
+  async function handleAnonymousLogin() {
+    if (firebaseEnabled) {
+      const credentials = await signInAnonymously(auth);
+      const guestProfile = {
+        id: credentials.user.uid,
+        familyName: "Gastfamilie",
+        city: "",
+        email: "",
+        description: "Anonymer Gastzugang.",
+        isAdmin: false,
+      };
+      await saveRecord("profiles", guestProfile);
+      return;
+    }
+
+    const profile = state.profiles[0];
+    setCurrentUserId(profile.id);
+    window.localStorage.setItem("ferientausch-current-user", profile.id);
+  }
+
+  async function handleLogout() {
+    if (firebaseEnabled) {
+      await signOut(auth);
+    }
+    setCurrentUserId(null);
+    window.localStorage.removeItem("ferientausch-current-user");
+  }
+
+  async function upsertHome(home) {
+    const normalized = {
+      ...home,
+      maxGuests: Number(home.maxGuests),
+      bedrooms: Number(home.bedrooms),
+      bathrooms: Number(home.bathrooms),
+      managedBy: home.managedBy ?? currentProfile.id,
+      ownerId: home.ownerId ?? currentProfile.id,
+      photos: home.photos.filter(Boolean),
+    };
+
+    await saveRecord("homes", normalized);
+    updateState((current) => {
+      const exists = current.homes.some((entry) => entry.id === normalized.id);
+      return {
+        ...current,
+        homes: exists
+          ? current.homes.map((entry) => (entry.id === normalized.id ? normalized : entry))
+          : [...current.homes, normalized],
+      };
+    });
+  }
+
+  async function saveAvailability(availability) {
+    const home = state.homes.find((entry) => entry.id === availability.homeId);
+    const normalized = {
+      ...availability,
+      ownerId: home?.ownerId ?? currentProfile.id,
+    };
+
+    await saveRecord("availabilities", normalized);
+    updateState((current) => {
+      const exists = current.availabilities.some((entry) => entry.id === normalized.id);
+      return {
+        ...current,
+        availabilities: exists
+          ? current.availabilities.map((entry) => (entry.id === normalized.id ? normalized : entry))
+          : [...current.availabilities, normalized],
+      };
+    });
+  }
+
+  async function deleteAvailability(id) {
+    await removeRecord("availabilities", id);
+    updateState((current) => ({
+      ...current,
+      availabilities: current.availabilities.filter((availability) => availability.id !== id),
+    }));
+  }
+
+  async function createRequest(draft) {
+    const targetHome = state.homes.find((home) => home.id === draft.homeId);
+    const request = {
+      id: createId("request"),
+      fromUserId: currentProfile.id,
+      toUserId: targetHome.ownerId,
+      homeId: draft.homeId,
+      start: draft.start,
+      end: draft.end,
+      guests: Number(draft.guests),
+      status: "pending",
+      messages: [
+        {
+          authorId: currentProfile.id,
+          text: draft.message || "Wir wuerden diesen Zeitraum gern tauschen.",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    };
+
+    await saveRecord("exchangeRequests", request);
+    updateState((current) => ({ ...current, requests: [...current.requests, request] }));
+    setRequestDraft(null);
+    setActiveTab("requests");
+  }
+
+  async function updateRequestStatus(id, status) {
+    await patchRecord("exchangeRequests", id, { status });
+    updateState((current) => ({
+      ...current,
+      requests: current.requests.map((request) => (request.id === id ? { ...request, status } : request)),
+    }));
+  }
+
+  async function addRequestMessage(id, text) {
+    const request = state.requests.find((entry) => entry.id === id);
+    const messages = [
+      ...request.messages,
+      {
+        authorId: currentProfile.id,
+        text,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    await patchRecord("exchangeRequests", id, { messages });
+    updateState((current) => ({
+      ...current,
+      requests: current.requests.map((entry) => (entry.id === id ? { ...entry, messages } : entry)),
+    }));
+  }
+
+  async function saveProfile(profile) {
+    await saveRecord("profiles", profile);
+    updateState((current) => ({
+      ...current,
+      profiles: current.profiles.map((entry) => (entry.id === profile.id ? profile : entry)),
+    }));
+  }
+
+  async function toggleAdmin(profileId) {
+    const profile = state.profiles.find((entry) => entry.id === profileId);
+    const next = { ...profile, isAdmin: !profile.isAdmin };
+    await saveProfile(next);
+  }
+
+  async function deleteHome(id) {
+    await removeRecord("homes", id);
+    updateState((current) => ({
+      ...current,
+      homes: current.homes.filter((home) => home.id !== id),
+      availabilities: current.availabilities.filter((availability) => availability.homeId !== id),
+    }));
+  }
+
+  async function deleteProfile(id) {
+    await removeRecord("profiles", id);
+    updateState((current) => ({
+      ...current,
+      profiles: current.profiles.filter((profile) => profile.id !== id),
+      homes: current.homes.filter((home) => home.ownerId !== id),
+    }));
+  }
+
+  if (!currentProfile) {
+    return <AuthScreen authMode={authMode} onAuthModeChange={setAuthMode} onSubmit={handleAuthSubmit} onAnonymous={handleAnonymousLogin} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f5f3ee] text-[#24313a]">
+      <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-[#f5f3ee]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-lg bg-[#2d6a62] text-white">
+              <Home size={22} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-normal">FerienTausch</h1>
+              <p className="text-sm text-[#5f6e67]">{currentProfile.familyName} aus {currentProfile.city || "dem Freundeskreis"}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone={firebaseEnabled ? "green" : "amber"}>{firebaseEnabled ? "Firebase aktiv" : "Demo-Modus"}</Pill>
+            {currentProfile.isAdmin && (
+              <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
+                <ShieldCheck size={18} /> Admin
+              </button>
+            )}
+            <IconButton label="Abmelden" onClick={handleLogout}>
+              <LogOut size={18} />
+            </IconButton>
+          </div>
+        </div>
+        <nav className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 pb-3 sm:px-6">
+          {[...tabs, ...(currentProfile.isAdmin ? [{ id: "admin", label: "Admin", icon: ShieldCheck }] : [])].map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${
+                  active ? "bg-[#24313a] text-white" : "bg-white text-[#4f5d55] hover:bg-[#edf1e8]"
+                }`}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <Icon size={17} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </nav>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        {activeTab === "discover" && (
+          <DiscoverView
+            homes={filteredHomes}
+            allAvailabilities={state.availabilities}
+            currentProfile={currentProfile}
+            query={query}
+            setQuery={setQuery}
+            minGuests={minGuests}
+            setMinGuests={setMinGuests}
+            travelStart={travelStart}
+            setTravelStart={setTravelStart}
+            travelEnd={travelEnd}
+            setTravelEnd={setTravelEnd}
+            onRequest={setRequestDraft}
+          />
+        )}
+        {activeTab === "my-home" && (
+          <MyHomeView homes={ownedHomes} currentProfile={currentProfile} onSave={upsertHome} onDelete={deleteHome} />
+        )}
+        {activeTab === "calendar" && (
+          <CalendarView
+            homes={ownedHomes}
+            availabilities={state.availabilities.filter((entry) => ownedHomes.some((home) => home.id === entry.homeId))}
+            onSave={saveAvailability}
+            onDelete={deleteAvailability}
+          />
+        )}
+        {activeTab === "matcher" && (
+          <MatcherView matches={matches} currentProfile={currentProfile} onRequest={setRequestDraft} />
+        )}
+        {activeTab === "requests" && (
+          <RequestsView
+            requests={state.requests}
+            homes={state.homes}
+            profiles={state.profiles}
+            currentProfile={currentProfile}
+            onStatus={updateRequestStatus}
+            onMessage={addRequestMessage}
+          />
+        )}
+        {activeTab === "profile" && <ProfileView profile={currentProfile} onSave={saveProfile} />}
+        {activeTab === "admin" && currentProfile.isAdmin && (
+          <AdminView
+            state={state}
+            currentProfile={currentProfile}
+            onSaveHome={upsertHome}
+            onDeleteHome={deleteHome}
+            onToggleAdmin={toggleAdmin}
+            onDeleteProfile={deleteProfile}
+          />
+        )}
+      </main>
+
+      {requestDraft && (
+        <RequestPanel draft={requestDraft} home={state.homes.find((home) => home.id === requestDraft.homeId)} onClose={() => setRequestDraft(null)} onSubmit={createRequest} />
+      )}
+    </div>
+  );
+}
+
+function AuthScreen({ authMode, onAuthModeChange, onSubmit, onAnonymous }) {
+  return (
+    <main className="min-h-screen bg-[#f5f3ee]">
+      <section className="relative grid min-h-screen place-items-center overflow-hidden px-4 py-10">
+        <img
+          className="absolute inset-0 h-full w-full object-cover"
+          src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1800&q=80"
+          alt=""
+        />
+        <div className="absolute inset-0 bg-[#203036]/65" />
+        <div className="relative grid w-full max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+          <div className="pb-4 text-white">
+            <p className="mb-3 inline-flex rounded-lg bg-white/15 px-3 py-1 text-sm font-semibold backdrop-blur">Ferien im Haus von Freunden</p>
+            <h1 className="max-w-2xl text-5xl font-bold tracking-normal sm:text-6xl">FerienTausch</h1>
+            <p className="mt-4 max-w-xl text-lg leading-8 text-white/88">
+              Haeuser, freie Zeitraeume, Smart Matches und Tauschanfragen fuer euren privaten Familienkreis.
+            </p>
+          </div>
+          <form
+            className="rounded-lg bg-white p-5 shadow-soft"
+            onSubmit={(event) => onSubmit(event, event.currentTarget)}
+          >
+            <div className="mb-5 flex rounded-lg bg-[#edf1e8] p-1">
+              <button
+                type="button"
+                className={`h-10 flex-1 rounded-lg text-sm font-semibold ${authMode === "login" ? "bg-white shadow" : ""}`}
+                onClick={() => onAuthModeChange("login")}
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                className={`h-10 flex-1 rounded-lg text-sm font-semibold ${authMode === "register" ? "bg-white shadow" : ""}`}
+                onClick={() => onAuthModeChange("register")}
+              >
+                Registrieren
+              </button>
+            </div>
+            {authMode === "register" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field name="familyName" label="Familienname" required />
+                <Field name="city" label="Wohnort" required />
+              </div>
+            )}
+            <Field name="email" label="E-Mail" type="email" defaultValue="mayer@example.com" required />
+            <Field name="password" label="Passwort" type="password" defaultValue="ferien123" required />
+            <button className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white">
+              <UserPlus size={18} /> {authMode === "register" ? "Konto erstellen" : "Einloggen"}
+            </button>
+            <button
+              type="button"
+              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-4 font-semibold"
+              onClick={onAnonymous}
+            >
+              <ChevronRight size={18} /> Demo betreten
+            </button>
+          </form>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function DiscoverView({
+  homes,
+  allAvailabilities,
+  currentProfile,
+  query,
+  setQuery,
+  minGuests,
+  setMinGuests,
+  travelStart,
+  setTravelStart,
+  travelEnd,
+  setTravelEnd,
+  onRequest,
+}) {
+  return (
+    <div className="space-y-5">
+      <Toolbar>
+        <SearchField value={query} onChange={setQuery} placeholder="Ort, Adresse oder Haus suchen" />
+        <FieldCompact label="Mind. Gaeste" type="number" value={minGuests} onChange={setMinGuests} />
+        <FieldCompact label="Von" type="date" value={travelStart} onChange={setTravelStart} />
+        <FieldCompact label="Bis" type="date" value={travelEnd} onChange={setTravelEnd} />
+      </Toolbar>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {homes.map((home) => (
+          <HomeCard
+            key={home.id}
+            home={home}
+            availabilities={allAvailabilities.filter((availability) => availability.homeId === home.id)}
+            disabled={home.ownerId === currentProfile.id}
+            onRequest={() =>
+              onRequest({
+                homeId: home.id,
+                start: travelStart || allAvailabilities.find((availability) => availability.homeId === home.id)?.start || "",
+                end: travelEnd || allAvailabilities.find((availability) => availability.homeId === home.id)?.end || "",
+                guests: Math.min(4, home.maxGuests),
+                message: "",
+              })
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MyHomeView({ homes, currentProfile, onSave, onDelete }) {
+  const [editing, setEditing] = useState(homes[0] ?? { ...blankHouse, id: createId("home"), ownerId: currentProfile.id, managedBy: currentProfile.id });
+
+  useEffect(() => {
+    if (homes.length && !homes.some((home) => home.id === editing.id)) {
+      setEditing(homes[0]);
+    }
+  }, [editing.id, homes]);
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold">Meine Unterkuenfte</h2>
+          <IconButton
+            label="Neue Unterkunft"
+            onClick={() => setEditing({ ...blankHouse, id: createId("home"), ownerId: currentProfile.id, managedBy: currentProfile.id })}
+          >
+            <Plus size={18} />
+          </IconButton>
+        </div>
+        {homes.map((home) => (
+          <button
+            key={home.id}
+            className={`w-full rounded-lg border p-3 text-left ${editing.id === home.id ? "border-[#2d6a62] bg-white" : "border-[#ded8cb] bg-white/70"}`}
+            onClick={() => setEditing(home)}
+          >
+            <strong>{home.title || "Neue Unterkunft"}</strong>
+            <p className="mt-1 text-sm text-[#66756d]">{home.city} · bis {home.maxGuests} Gaeste</p>
+          </button>
+        ))}
+      </section>
+      <HouseEditor value={editing} onChange={setEditing} onSave={onSave} onDelete={onDelete} />
+    </div>
+  );
+}
+
+function CalendarView({ homes, availabilities, onSave, onDelete }) {
+  const [form, setForm] = useState({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
+      <section className="rounded-lg bg-white p-4 shadow-soft">
+        <h2 className="text-xl font-bold">Freien Zeitraum eintragen</h2>
+        <div className="mt-4 space-y-3">
+          <label className="block text-sm font-semibold">
+            Unterkunft
+            <select className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] px-3" value={form.homeId} onChange={(event) => setForm({ ...form, homeId: event.target.value })}>
+              {homes.map((home) => (
+                <option key={home.id} value={home.id}>{home.title}</option>
+              ))}
+            </select>
+          </label>
+          <FieldControlled label="Titel" value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="Sommerferien Bayern" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FieldControlled label="Start" type="date" value={form.start} onChange={(start) => setForm({ ...form, start })} />
+            <FieldControlled label="Ende" type="date" value={form.end} onChange={(end) => setForm({ ...form, end })} />
+          </div>
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white disabled:opacity-50"
+            disabled={!form.homeId || !form.start || !form.end}
+            onClick={() => {
+              onSave(form);
+              setForm({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
+            }}
+          >
+            <CalendarDays size={18} /> Zeitraum speichern
+          </button>
+        </div>
+      </section>
+      <section>
+        <h2 className="mb-3 text-xl font-bold">Eingetragene Zeitraeume</h2>
+        <div className="grid gap-3">
+          {availabilities.map((availability) => (
+            <div key={availability.id} className="flex flex-col gap-3 rounded-lg bg-white p-4 shadow-soft sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <strong>{availability.title}</strong>
+                <p className="text-sm text-[#66756d]">{homes.find((home) => home.id === availability.homeId)?.title} · {formatDateRange(availability.start, availability.end)}</p>
+              </div>
+              <IconButton label="Zeitraum loeschen" onClick={() => onDelete(availability.id)}>
+                <Trash2 size={18} />
+              </IconButton>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MatcherView({ matches, onRequest }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <div>
+          <h2 className="text-2xl font-bold">Smart Matcher</h2>
+          <p className="mt-1 text-[#66756d]">Direkte Vorschlaege ab drei Tagen Ueberschneidung.</p>
+        </div>
+        <Pill tone="green">{matches.length} Matches</Pill>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {matches.map((match) => (
+          <article key={match.id} className="rounded-lg bg-white p-4 shadow-soft">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <Pill tone="green">{match.overlap.days} Tage</Pill>
+                <h3 className="mt-3 text-xl font-bold">{match.targetHome.title}</h3>
+                <p className="mt-1 text-sm text-[#66756d]">{match.targetHome.city} · {formatDateRange(match.overlap.start, match.overlap.end)}</p>
+              </div>
+              <Sparkles className="text-[#d97706]" size={28} />
+            </div>
+            <p className="mt-4 text-sm leading-6 text-[#4f5d55]">
+              Eure Verfuegbarkeit "{match.myAvailability.title}" ueberschneidet sich mit "{match.targetAvailability.title}".
+            </p>
+            <button
+              className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-[#e05f4f] px-4 text-sm font-semibold text-white"
+              onClick={() =>
+                onRequest({
+                  homeId: match.targetHome.id,
+                  start: match.overlap.start,
+                  end: match.overlap.end,
+                  guests: Math.min(4, match.targetHome.maxGuests),
+                  message: `Unser Zeitraum passt ${match.overlap.days} Tage zu eurem Angebot.`,
+                })
+              }
+            >
+              <Send size={17} /> Tausch anfragen
+            </button>
+          </article>
+        ))}
+      </div>
+      {!matches.length && <EmptyState title="Noch keine Ueberschneidung" text="Sobald mindestens drei gemeinsame Tage gefunden werden, erscheint hier ein Vorschlag." />}
+    </div>
+  );
+}
+
+function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onMessage }) {
+  const visibleRequests = requests.filter((request) => request.fromUserId === currentProfile.id || request.toUserId === currentProfile.id || currentProfile.isAdmin);
+
+  return (
+    <div className="grid gap-4">
+      {visibleRequests.map((request) => (
+        <RequestCard
+          key={request.id}
+          request={request}
+          home={homes.find((home) => home.id === request.homeId)}
+          from={profiles.find((profile) => profile.id === request.fromUserId)}
+          to={profiles.find((profile) => profile.id === request.toUserId)}
+          currentProfile={currentProfile}
+          onStatus={onStatus}
+          onMessage={onMessage}
+        />
+      ))}
+      {!visibleRequests.length && <EmptyState title="Keine Anfragen" text="Neue Tauschanfragen erscheinen hier mit Status und Nachrichtenverlauf." />}
+    </div>
+  );
+}
+
+function ProfileView({ profile, onSave }) {
+  const [form, setForm] = useState(profile);
+
+  return (
+    <section className="max-w-2xl rounded-lg bg-white p-5 shadow-soft">
+      <h2 className="text-xl font-bold">Profil verwalten</h2>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <FieldControlled label="Familienname" value={form.familyName} onChange={(familyName) => setForm({ ...form, familyName })} />
+        <FieldControlled label="Wohnort" value={form.city} onChange={(city) => setForm({ ...form, city })} />
+      </div>
+      <FieldControlled label="E-Mail" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
+      <label className="mt-3 block text-sm font-semibold">
+        Beschreibung
+        <textarea className="mt-1 min-h-28 w-full rounded-lg border border-[#cfd7cd] p-3" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
+      </label>
+      <button className="mt-4 inline-flex h-11 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white" onClick={() => onSave(form)}>
+        <Check size={18} /> Profil speichern
+      </button>
+    </section>
+  );
+}
+
+function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onToggleAdmin, onDeleteProfile }) {
+  const [externalHome, setExternalHome] = useState({
+    ...blankHouse,
+    id: createId("home"),
+    ownerId: createId("external"),
+    managedBy: currentProfile.id,
+    isExternal: true,
+  });
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 md:grid-cols-3">
+        <Metric label="Unterkuenfte" value={state.homes.length} />
+        <Metric label="Mitglieder" value={state.profiles.length} />
+        <Metric label="Tauschanfragen" value={state.requests.length} />
+      </div>
+      <section className="rounded-lg bg-white p-4 shadow-soft">
+        <h2 className="text-xl font-bold">Mitglieder & Rechte</h2>
+        <div className="mt-3 divide-y divide-[#edf0ea]">
+          {state.profiles.map((profile) => (
+            <div key={profile.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <strong>{profile.familyName}</strong>
+                <p className="text-sm text-[#66756d]">{profile.email} · {profile.city}</p>
+              </div>
+              <div className="flex gap-2">
+                <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onToggleAdmin(profile.id)}>
+                  <ShieldCheck size={17} /> {profile.isAdmin ? "Admin entfernen" : "Admin vergeben"}
+                </button>
+                {profile.id !== currentProfile.id && (
+                  <IconButton label="Profil loeschen" onClick={() => onDeleteProfile(profile.id)}>
+                    <Trash2 size={18} />
+                  </IconButton>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+        <div className="rounded-lg bg-white p-4 shadow-soft">
+          <h2 className="text-xl font-bold">Haus fuer Dritte eintragen</h2>
+          <HouseEditor
+            compact
+            value={externalHome}
+            onChange={setExternalHome}
+            onSave={(home) => {
+              onSaveHome({ ...home, isExternal: true, managedBy: currentProfile.id });
+              setExternalHome({ ...blankHouse, id: createId("home"), ownerId: createId("external"), managedBy: currentProfile.id, isExternal: true });
+            }}
+          />
+        </div>
+        <div>
+          <h2 className="mb-3 text-xl font-bold">Alle Unterkuenfte</h2>
+          <div className="grid gap-3">
+            {state.homes.map((home) => (
+              <div key={home.id} className="flex items-center justify-between gap-3 rounded-lg bg-white p-3 shadow-soft">
+                <div>
+                  <strong>{home.title}</strong>
+                  <p className="text-sm text-[#66756d]">{home.city} {home.isExternal ? "· extern gepflegt" : ""}</p>
+                </div>
+                <IconButton label="Unterkunft loeschen" onClick={() => onDeleteHome(home.id)}>
+                  <Trash2 size={18} />
+                </IconButton>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HomeCard({ home, availabilities, disabled, onRequest }) {
+  return (
+    <article className="overflow-hidden rounded-lg bg-white shadow-soft">
+      <div className="relative aspect-[4/3] bg-[#dfe5dc]">
+        <img className="h-full w-full object-cover" src={home.photos[0] || "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80"} alt="" />
+        <div className="absolute left-3 top-3 flex gap-2">
+          {home.isExternal && <Pill tone="amber">Extern</Pill>}
+        </div>
+      </div>
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold">{home.title}</h3>
+            <p className="mt-1 inline-flex items-center gap-1 text-sm text-[#66756d]"><MapPin size={15} /> {home.city}</p>
+          </div>
+          <Pill tone="green">bis {home.maxGuests}</Pill>
+        </div>
+        <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#4f5d55]">{home.description}</p>
+        <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
+          <Fact icon={Users} label={`${home.maxGuests} Gaeste`} />
+          <Fact icon={BedDouble} label={`${home.bedrooms} Schlafz.`} />
+          <Fact icon={Bath} label={`${home.bathrooms} Bad`} />
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {home.amenities.slice(0, 5).map((amenity) => <Pill key={amenity}>{amenity}</Pill>)}
+        </div>
+        <div className="mt-4 space-y-2">
+          {availabilities.slice(0, 2).map((availability) => (
+            <div key={availability.id} className="rounded-lg bg-[#f6f8f3] px-3 py-2 text-sm">
+              <strong>{availability.title}</strong>
+              <span className="ml-2 text-[#66756d]">{formatDateRange(availability.start, availability.end)}</span>
+            </div>
+          ))}
+        </div>
+        <button
+          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
+          disabled={disabled}
+          onClick={onRequest}
+        >
+          <Send size={17} /> {disabled ? "Eigenes Haus" : "Tausch anfragen"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function HouseEditor({ value, onChange, onSave, onDelete, compact = false }) {
+  const [photoUrl, setPhotoUrl] = useState("");
+
+  function updateField(field, nextValue) {
+    onChange({ ...value, [field]: nextValue });
+  }
+
+  async function handleFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    updateField("photos", [...value.photos, dataUrl]);
+  }
+
+  return (
+    <section className={compact ? "" : "rounded-lg bg-white p-5 shadow-soft"}>
+      {!compact && <h2 className="mb-4 text-xl font-bold">Unterkunft bearbeiten</h2>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FieldControlled label="Titel" value={value.title} onChange={(title) => updateField("title", title)} />
+        <FieldControlled label="Standort/Stadt" value={value.city} onChange={(city) => updateField("city", city)} />
+      </div>
+      <FieldControlled label="Adresse" value={value.address} onChange={(address) => updateField("address", address)} />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <FieldControlled label="Max. Gaeste" type="number" value={value.maxGuests} onChange={(maxGuests) => updateField("maxGuests", maxGuests)} />
+        <FieldControlled label="Schlafzimmer" type="number" value={value.bedrooms} onChange={(bedrooms) => updateField("bedrooms", bedrooms)} />
+        <FieldControlled label="Baeder" type="number" value={value.bathrooms} onChange={(bathrooms) => updateField("bathrooms", bathrooms)} />
+      </div>
+      <label className="mt-3 block text-sm font-semibold">
+        Beschreibung
+        <textarea className="mt-1 min-h-24 w-full rounded-lg border border-[#cfd7cd] p-3" value={value.description} onChange={(event) => updateField("description", event.target.value)} />
+      </label>
+      <div className="mt-3">
+        <span className="text-sm font-semibold">Ausstattung</span>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {amenityOptions.map((amenity) => {
+            const selected = value.amenities.includes(amenity);
+            return (
+              <button
+                key={amenity}
+                type="button"
+                className={`h-9 rounded-lg px-3 text-sm font-semibold ${selected ? "bg-[#2d6a62] text-white" : "bg-[#edf1e8] text-[#4f5d55]"}`}
+                onClick={() =>
+                  updateField(
+                    "amenities",
+                    selected ? value.amenities.filter((entry) => entry !== amenity) : [...value.amenities, amenity],
+                  )
+                }
+              >
+                {amenity}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="mt-4">
+        <span className="text-sm font-semibold">Bildergalerie</span>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {value.photos.map((photo, index) => (
+            <div key={`${photo}-${index}`} className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#edf1e8]">
+              <img className="h-full w-full object-cover" src={photo} alt="" />
+              <button
+                type="button"
+                className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-lg bg-white/90"
+                onClick={() => updateField("photos", value.photos.filter((_, photoIndex) => photoIndex !== index))}
+                aria-label="Bild entfernen"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+          <input className="h-11 rounded-lg border border-[#cfd7cd] px-3" value={photoUrl} onChange={(event) => setPhotoUrl(event.target.value)} placeholder="Bild-URL" />
+          <button
+            type="button"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 font-semibold"
+            onClick={() => {
+              if (photoUrl) {
+                updateField("photos", [...value.photos, photoUrl]);
+                setPhotoUrl("");
+              }
+            }}
+          >
+            <Plus size={18} /> URL
+          </button>
+          <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#24313a] px-3 font-semibold text-white">
+            <ImagePlus size={18} /> Upload
+            <input className="sr-only" type="file" accept="image/*" onChange={handleFile} />
+          </label>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white" onClick={() => onSave(value)}>
+          <Check size={18} /> Speichern
+        </button>
+        {onDelete && (
+          <button className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#d8c4bd] bg-white px-4 font-semibold text-[#9f3f34]" onClick={() => onDelete(value.id)}>
+            <Trash2 size={18} /> Loeschen
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RequestPanel({ draft, home, onClose, onSubmit }) {
+  const [form, setForm] = useState(draft);
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-end bg-black/35 p-3 sm:place-items-center">
+      <section className="w-full max-w-lg rounded-lg bg-white p-5 shadow-soft">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold">Tauschanfrage</h2>
+            <p className="mt-1 text-sm text-[#66756d]">{home?.title}</p>
+          </div>
+          <IconButton label="Schliessen" onClick={onClose}>
+            <X size={18} />
+          </IconButton>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <FieldControlled label="Start" type="date" value={form.start} onChange={(start) => setForm({ ...form, start })} />
+          <FieldControlled label="Ende" type="date" value={form.end} onChange={(end) => setForm({ ...form, end })} />
+        </div>
+        <FieldControlled label="Personenanzahl" type="number" value={form.guests} onChange={(guests) => setForm({ ...form, guests })} />
+        <label className="mt-3 block text-sm font-semibold">
+          Nachricht
+          <textarea className="mt-1 min-h-24 w-full rounded-lg border border-[#cfd7cd] p-3" value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} />
+        </label>
+        <button
+          className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 font-semibold text-white disabled:opacity-50"
+          disabled={!form.start || !form.end || !form.guests}
+          onClick={() => onSubmit(form)}
+        >
+          <Send size={18} /> Anfrage senden
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function RequestCard({ request, home, from, to, currentProfile, onStatus, onMessage }) {
+  const [message, setMessage] = useState("");
+  const incoming = request.toUserId === currentProfile.id;
+
+  return (
+    <article className="rounded-lg bg-white p-4 shadow-soft">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <Pill tone={request.status === "accepted" ? "green" : request.status === "declined" ? "red" : "amber"}>{statusLabels[request.status]}</Pill>
+          <h3 className="mt-3 text-xl font-bold">{home?.title ?? "Unterkunft"}</h3>
+          <p className="mt-1 text-sm text-[#66756d]">
+            {formatDateRange(request.start, request.end)} · {request.guests} Personen · {from?.familyName} an {to?.familyName ?? "extern"}
+          </p>
+        </div>
+        {incoming && request.status === "pending" && (
+          <div className="flex gap-2">
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-3 text-sm font-semibold text-white" onClick={() => onStatus(request.id, "accepted")}>
+              <Check size={17} /> Annehmen
+            </button>
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d8c4bd] px-3 text-sm font-semibold text-[#9f3f34]" onClick={() => onStatus(request.id, "declined")}>
+              <X size={17} /> Ablehnen
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="mt-4 space-y-2">
+        {request.messages.map((entry, index) => (
+          <div key={`${entry.createdAt}-${index}`} className="rounded-lg bg-[#f6f8f3] p-3 text-sm">
+            <strong>{entry.authorId === currentProfile.id ? "Du" : "Gegenueber"}</strong>
+            <p className="mt-1 text-[#4f5d55]">{entry.text}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+        <input className="h-11 rounded-lg border border-[#cfd7cd] px-3" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Nachricht schreiben" />
+        <button
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#24313a] px-4 font-semibold text-white disabled:opacity-50"
+          disabled={!message}
+          onClick={() => {
+            onMessage(request.id, message);
+            setMessage("");
+          }}
+        >
+          <Send size={18} /> Senden
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function Field({ label, name, type = "text", defaultValue = "", required = false }) {
+  return (
+    <label className="mt-3 block text-sm font-semibold">
+      {label}
+      <input className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] px-3" name={name} type={type} defaultValue={defaultValue} required={required} />
+    </label>
+  );
+}
+
+function FieldControlled({ label, value, onChange, type = "text", placeholder = "" }) {
+  return (
+    <label className="mt-3 block text-sm font-semibold">
+      {label}
+      <input className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] px-3" type={type} value={value ?? ""} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function FieldCompact({ label, value, onChange, type = "text" }) {
+  return (
+    <label className="min-w-36 text-xs font-bold uppercase text-[#66756d]">
+      {label}
+      <input className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] bg-white px-3 text-sm font-medium normal-case text-[#24313a]" type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function SearchField({ value, onChange, placeholder }) {
+  return (
+    <label className="relative min-w-64 flex-1">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#66756d]" size={18} />
+      <input className="h-11 w-full rounded-lg border border-[#cfd7cd] bg-white pl-10 pr-3" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+    </label>
+  );
+}
+
+function Toolbar({ children }) {
+  return <div className="flex flex-col gap-3 rounded-lg bg-white p-3 shadow-soft lg:flex-row lg:items-end">{children}</div>;
+}
+
+function IconButton({ label, children, onClick }) {
+  return (
+    <button
+      className="grid h-10 min-w-10 place-items-center rounded-lg border border-[#cfd7cd] bg-white px-2 text-[#24313a] hover:bg-[#edf1e8]"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
+function Pill({ children, tone = "neutral" }) {
+  const tones = {
+    neutral: "bg-[#edf1e8] text-[#4f5d55]",
+    green: "bg-[#dcedd8] text-[#255c37]",
+    amber: "bg-[#f8e7bd] text-[#75511a]",
+    red: "bg-[#f4d3cd] text-[#8a332b]",
+  };
+
+  return <span className={`inline-flex h-7 items-center rounded-lg px-2 text-xs font-bold ${tones[tone]}`}>{children}</span>;
+}
+
+function Fact({ icon: Icon, label }) {
+  return (
+    <div className="flex min-h-10 items-center justify-center gap-1 rounded-lg bg-[#f6f8f3] px-2 text-center">
+      <Icon size={16} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function Metric({ label, value }) {
+  return (
+    <div className="rounded-lg bg-white p-4 shadow-soft">
+      <p className="text-sm font-semibold text-[#66756d]">{label}</p>
+      <strong className="mt-2 block text-3xl">{value}</strong>
+    </div>
+  );
+}
+
+function EmptyState({ title, text }) {
+  return (
+    <div className="rounded-lg border border-dashed border-[#c9cfc5] bg-white/70 p-8 text-center">
+      <h3 className="text-lg font-bold">{title}</h3>
+      <p className="mt-2 text-sm text-[#66756d]">{text}</p>
+    </div>
+  );
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export default App;

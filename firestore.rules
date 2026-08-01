@@ -1,0 +1,45 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/profiles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    match /profiles/{profileId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && profileId == request.auth.uid;
+      allow update: if isAdmin() || profileId == request.auth.uid;
+      allow delete: if isAdmin() && profileId != request.auth.uid;
+    }
+
+    match /homes/{homeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin() || resource.data.ownerId == request.auth.uid || resource.data.managedBy == request.auth.uid;
+    }
+
+    match /availabilities/{availabilityId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin() || resource.data.ownerId == request.auth.uid;
+    }
+
+    match /exchangeRequests/{requestId} {
+      allow read: if isAdmin()
+        || resource.data.fromUserId == request.auth.uid
+        || resource.data.toUserId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.fromUserId == request.auth.uid;
+      allow update: if isAdmin()
+        || resource.data.fromUserId == request.auth.uid
+        || resource.data.toUserId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+  }
+}

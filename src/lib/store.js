@@ -1,0 +1,82 @@
+import {
+  addDoc,
+  collection,
+  db,
+  deleteDoc,
+  doc,
+  firebaseEnabled,
+  onSnapshot,
+  setDoc,
+  updateDoc,
+} from "./firebase";
+import { createSeedState } from "./demoData";
+
+const STORAGE_KEY = "ferientausch-state-v1";
+
+export function loadLocalState() {
+  const raw = window.localStorage.getItem(STORAGE_KEY);
+  if (!raw) {
+    const seed = createSeedState();
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+    return seed;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const seed = createSeedState();
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
+    return seed;
+  }
+}
+
+export function saveLocalState(nextState) {
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+}
+
+export function createId(prefix) {
+  const randomPart =
+    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  return `${prefix}-${randomPart}`;
+}
+
+export function subscribeCollection(name, onValue) {
+  if (!firebaseEnabled) {
+    return () => {};
+  }
+
+  return onSnapshot(collection(db, name), (snapshot) => {
+    onValue(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+  });
+}
+
+export async function saveRecord(collectionName, record) {
+  if (!firebaseEnabled) {
+    return record;
+  }
+
+  if (record.id) {
+    const { id, ...data } = record;
+    await setDoc(doc(db, collectionName, id), data, { merge: true });
+    return record;
+  }
+
+  const created = await addDoc(collection(db, collectionName), record);
+  return { id: created.id, ...record };
+}
+
+export async function patchRecord(collectionName, id, updates) {
+  if (!firebaseEnabled) {
+    return;
+  }
+
+  await updateDoc(doc(db, collectionName, id), updates);
+}
+
+export async function removeRecord(collectionName, id) {
+  if (!firebaseEnabled) {
+    return;
+  }
+
+  await deleteDoc(doc(db, collectionName, id));
+}
