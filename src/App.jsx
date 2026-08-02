@@ -27,6 +27,7 @@ import {
   firebaseConfigComplete,
   firebaseEnabled,
   firebaseProjectId,
+  firestoreDatabaseId,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,
@@ -577,7 +578,7 @@ function App() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Pill tone={firebaseEnabled && firebaseConfigComplete ? "green" : "amber"}>
-              {firebaseEnabled ? `Firebase: ${firebaseProjectId}` : "Demo-Modus"}
+              {firebaseEnabled ? `Firebase: ${firebaseProjectId}/${firestoreDatabaseId}` : "Demo-Modus"}
             </Pill>
             {firebaseEnabled && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={runFirebaseWriteTest}>

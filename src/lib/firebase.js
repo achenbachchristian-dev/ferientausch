@@ -31,6 +31,7 @@ const firebaseConfig = {
 
 export const firebaseEnabled = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 export const firebaseProjectId = firebaseConfig.projectId ?? "";
+export const firestoreDatabaseId = import.meta.env.VITE_FIRESTORE_DATABASE_ID || "ferientausch";
 export const firebaseConfigComplete = Boolean(
   firebaseConfig.apiKey &&
     firebaseConfig.authDomain &&
@@ -43,10 +44,14 @@ export const firebaseConfigComplete = Boolean(
 const app = firebaseEnabled ? initializeApp(firebaseConfig) : null;
 export const auth = app ? getAuth(app) : null;
 export const db = app
-  ? initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      ignoreUndefinedProperties: true,
-    })
+  ? initializeFirestore(
+      app,
+      {
+        experimentalForceLongPolling: true,
+        ignoreUndefinedProperties: true,
+      },
+      firestoreDatabaseId,
+    )
   : null;
 
 export {
