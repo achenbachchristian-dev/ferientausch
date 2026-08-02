@@ -114,6 +114,16 @@ function getHomeCoverPhoto(home) {
   return photos[Math.min(Math.max(coverIndex, 0), photos.length - 1)] ?? photos[0];
 }
 
+function getPhotoCaptions(home) {
+  const photos = getHomePhotos(home);
+  const captions = Array.isArray(home?.photoCaptions) ? home.photoCaptions : [];
+  return photos.map((_, index) => captions[index] ?? "");
+}
+
+function getPhotoCaption(home, index) {
+  return getPhotoCaptions(home)[index] ?? "";
+}
+
 function moveArrayItem(items, fromIndex, toIndex) {
   const next = [...items];
   const [item] = next.splice(fromIndex, 1);
@@ -411,6 +421,7 @@ function App() {
     try {
       setFirebaseError("");
       const photos = getHomePhotos(home);
+      const photoCaptions = getPhotoCaptions(home).slice(0, photos.length);
       const normalized = {
         ...home,
         maxGuests: Number(home.maxGuests),
@@ -419,6 +430,7 @@ function App() {
         managedBy: home.managedBy ?? currentProfile.id,
         ownerId: home.ownerId ?? currentProfile.id,
         photos,
+        photoCaptions,
         coverPhotoIndex: Math.min(
           Math.max(Number(home.coverPhotoIndex ?? 0), 0),
           Math.max(photos.length - 1, 0),
@@ -1505,6 +1517,7 @@ function HomeDetailPanel({ home, owner, availabilities, disabled, onClose, onReq
   }
 
   const selectedPhoto = photos[selectedPhotoIndex] ?? getHomeCoverPhoto(home);
+  const selectedCaption = getPhotoCaption(home, selectedPhotoIndex);
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/45 p-3 sm:place-items-center">
@@ -1522,6 +1535,11 @@ function HomeDetailPanel({ home, owner, availabilities, disabled, onClose, onReq
           <div>
             <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#edf1e8]">
               <img className="h-full w-full object-cover" src={selectedPhoto} alt="" />
+              {selectedCaption && (
+                <div className="absolute inset-x-0 bottom-0 bg-black/58 px-4 py-3 text-sm font-semibold text-white">
+                  {selectedCaption}
+                </div>
+              )}
               {photos.length > 1 && (
                 <div className="absolute inset-x-3 top-1/2 flex -translate-y-1/2 justify-between">
                   <IconButton label="Vorheriges Bild" onClick={() => setSelectedPhotoIndex((current) => (current === 0 ? photos.length - 1 : current - 1))}>
@@ -1538,10 +1556,15 @@ function HomeDetailPanel({ home, owner, availabilities, disabled, onClose, onReq
                 {photos.map((photo, index) => (
                   <button
                     key={`${photo}-${index}`}
-                    className={`aspect-[4/3] overflow-hidden rounded-lg border ${selectedPhotoIndex === index ? "border-[#2d6a62]" : "border-[#edf0ea]"}`}
+                    className={`relative aspect-[4/3] overflow-hidden rounded-lg border ${selectedPhotoIndex === index ? "border-[#2d6a62]" : "border-[#edf0ea]"}`}
                     onClick={() => setSelectedPhotoIndex(index)}
                   >
                     <img className="h-full w-full object-cover" src={photo} alt="" />
+                    {getPhotoCaption(home, index) && (
+                      <span className="absolute inset-x-0 bottom-0 truncate bg-black/58 px-2 py-1 text-xs font-semibold text-white">
+                        {getPhotoCaption(home, index)}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1651,11 +1674,18 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
     onChange({ ...value, [field]: nextValue });
   }
 
-  function updatePhotos(nextPhotos, nextCoverIndex = value.coverPhotoIndex ?? 0) {
+  function updatePhotos(nextPhotos, nextCoverIndex = value.coverPhotoIndex ?? 0, nextCaptions = getPhotoCaptions(value)) {
     const coverPhotoIndex = nextPhotos.length
       ? Math.min(Math.max(Number(nextCoverIndex), 0), nextPhotos.length - 1)
       : 0;
-    onChange({ ...value, photos: nextPhotos, coverPhotoIndex });
+    const photoCaptions = nextPhotos.map((_, index) => nextCaptions[index] ?? "");
+    onChange({ ...value, photos: nextPhotos, photoCaptions, coverPhotoIndex });
+  }
+
+  function updatePhotoCaption(index, caption) {
+    const captions = getPhotoCaptions(value);
+    captions[index] = caption;
+    onChange({ ...value, photoCaptions: captions });
   }
 
   async function handleFile(event) {
@@ -1666,7 +1696,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
 
     setUploadingPhoto(true);
     const photoUrl = onUploadPhoto ? await onUploadPhoto(value.id, file) : await fileToDataUrl(file);
-    updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0);
+    updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0, [...getPhotoCaptions(value), ""]);
     setUploadingPhoto(false);
     event.target.value = "";
   }
@@ -1715,57 +1745,68 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
         <span className="text-sm font-semibold">Bildergalerie</span>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {getHomePhotos(value).map((photo, index) => (
-            <div key={`${photo}-${index}`} className={`relative aspect-[4/3] overflow-hidden rounded-lg border bg-[#edf1e8] ${Number(value.coverPhotoIndex ?? 0) === index ? "border-[#2d6a62]" : "border-transparent"}`}>
-              <img className="h-full w-full object-cover" src={photo} alt="" />
-              {Number(value.coverPhotoIndex ?? 0) === index && (
-                <span className="absolute left-2 top-2 rounded-lg bg-white/92 px-2 py-1 text-xs font-bold text-[#255c37]">Titelbild</span>
-              )}
-              <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1">
-                <button type="button" className="rounded-lg bg-white/92 px-2 py-1 text-xs font-bold" onClick={() => updatePhotos(getHomePhotos(value), index)}>
-                  Titel
-                </button>
-                <button
-                  type="button"
-                  className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 disabled:opacity-45"
-                  disabled={index === 0}
-                  onClick={() => {
-                    const nextPhotos = moveArrayItem(getHomePhotos(value), index, index - 1);
-                    const currentCover = Number(value.coverPhotoIndex ?? 0);
-                    const nextCover = currentCover === index ? index - 1 : currentCover === index - 1 ? index : currentCover;
-                    updatePhotos(nextPhotos, nextCover);
-                  }}
-                  aria-label="Bild nach links"
-                >
-                  <ArrowLeft size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 disabled:opacity-45"
-                  disabled={index === getHomePhotos(value).length - 1}
-                  onClick={() => {
-                    const nextPhotos = moveArrayItem(getHomePhotos(value), index, index + 1);
-                    const currentCover = Number(value.coverPhotoIndex ?? 0);
-                    const nextCover = currentCover === index ? index + 1 : currentCover === index + 1 ? index : currentCover;
-                    updatePhotos(nextPhotos, nextCover);
-                  }}
-                  aria-label="Bild nach rechts"
-                >
-                  <ArrowRight size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 text-[#9f3f34]"
-                  onClick={() => {
-                    const nextPhotos = getHomePhotos(value).filter((_, photoIndex) => photoIndex !== index);
-                    const currentCover = Number(value.coverPhotoIndex ?? 0);
-                    const nextCover = currentCover === index ? 0 : currentCover > index ? currentCover - 1 : currentCover;
-                    updatePhotos(nextPhotos, nextCover);
-                  }}
-                  aria-label="Bild entfernen"
-                >
-                  <X size={14} />
-                </button>
+            <div key={`${photo}-${index}`} className={`rounded-lg border bg-white p-2 ${Number(value.coverPhotoIndex ?? 0) === index ? "border-[#2d6a62]" : "border-[#edf0ea]"}`}>
+              <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#edf1e8]">
+                <img className="h-full w-full object-cover" src={photo} alt="" />
+                {Number(value.coverPhotoIndex ?? 0) === index && (
+                  <span className="absolute left-2 top-2 rounded-lg bg-white/92 px-2 py-1 text-xs font-bold text-[#255c37]">Titelbild</span>
+                )}
+                <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1">
+                  <button type="button" className="rounded-lg bg-white/92 px-2 py-1 text-xs font-bold" onClick={() => updatePhotos(getHomePhotos(value), index)}>
+                    Titel
+                  </button>
+                  <button
+                    type="button"
+                    className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 disabled:opacity-45"
+                    disabled={index === 0}
+                    onClick={() => {
+                      const nextPhotos = moveArrayItem(getHomePhotos(value), index, index - 1);
+                      const nextCaptions = moveArrayItem(getPhotoCaptions(value), index, index - 1);
+                      const currentCover = Number(value.coverPhotoIndex ?? 0);
+                      const nextCover = currentCover === index ? index - 1 : currentCover === index - 1 ? index : currentCover;
+                      updatePhotos(nextPhotos, nextCover, nextCaptions);
+                    }}
+                    aria-label="Bild nach links"
+                  >
+                    <ArrowLeft size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 disabled:opacity-45"
+                    disabled={index === getHomePhotos(value).length - 1}
+                    onClick={() => {
+                      const nextPhotos = moveArrayItem(getHomePhotos(value), index, index + 1);
+                      const nextCaptions = moveArrayItem(getPhotoCaptions(value), index, index + 1);
+                      const currentCover = Number(value.coverPhotoIndex ?? 0);
+                      const nextCover = currentCover === index ? index + 1 : currentCover === index + 1 ? index : currentCover;
+                      updatePhotos(nextPhotos, nextCover, nextCaptions);
+                    }}
+                    aria-label="Bild nach rechts"
+                  >
+                    <ArrowRight size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 text-[#9f3f34]"
+                    onClick={() => {
+                      const nextPhotos = getHomePhotos(value).filter((_, photoIndex) => photoIndex !== index);
+                      const nextCaptions = getPhotoCaptions(value).filter((_, captionIndex) => captionIndex !== index);
+                      const currentCover = Number(value.coverPhotoIndex ?? 0);
+                      const nextCover = currentCover === index ? 0 : currentCover > index ? currentCover - 1 : currentCover;
+                      updatePhotos(nextPhotos, nextCover, nextCaptions);
+                    }}
+                    aria-label="Bild entfernen"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
+              <input
+                className="mt-2 h-10 w-full rounded-lg border border-[#cfd7cd] px-3 text-sm"
+                value={getPhotoCaption(value, index)}
+                onChange={(event) => updatePhotoCaption(index, event.target.value)}
+                placeholder="Bildname, z. B. Wohnzimmer"
+              />
             </div>
           ))}
         </div>
@@ -1776,7 +1817,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
             className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 font-semibold"
             onClick={() => {
               if (photoUrl) {
-                updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0);
+                updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0, [...getPhotoCaptions(value), ""]);
                 setPhotoUrl("");
               }
             }}
