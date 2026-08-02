@@ -93,6 +93,7 @@ function App() {
   );
   const [authChecked, setAuthChecked] = useState(!firebaseEnabled);
   const [firebaseError, setFirebaseError] = useState("");
+  const [firebaseNotice, setFirebaseNotice] = useState("");
   const [activeTab, setActiveTab] = useState("discover");
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
@@ -315,112 +316,154 @@ function App() {
   }
 
   async function upsertHome(home) {
-    const normalized = {
-      ...home,
-      maxGuests: Number(home.maxGuests),
-      bedrooms: Number(home.bedrooms),
-      bathrooms: Number(home.bathrooms),
-      managedBy: home.managedBy ?? currentProfile.id,
-      ownerId: home.ownerId ?? currentProfile.id,
-      photos: home.photos.filter(Boolean),
-    };
-
-    await saveRecord("homes", normalized);
-    updateState((current) => {
-      const exists = current.homes.some((entry) => entry.id === normalized.id);
-      return {
-        ...current,
-        homes: exists
-          ? current.homes.map((entry) => (entry.id === normalized.id ? normalized : entry))
-          : [...current.homes, normalized],
+    try {
+      setFirebaseError("");
+      const normalized = {
+        ...home,
+        maxGuests: Number(home.maxGuests),
+        bedrooms: Number(home.bedrooms),
+        bathrooms: Number(home.bathrooms),
+        managedBy: home.managedBy ?? currentProfile.id,
+        ownerId: home.ownerId ?? currentProfile.id,
+        photos: home.photos.filter(Boolean),
       };
-    });
+
+      await saveRecord("homes", normalized);
+      updateState((current) => {
+        const exists = current.homes.some((entry) => entry.id === normalized.id);
+        return {
+          ...current,
+          homes: exists
+            ? current.homes.map((entry) => (entry.id === normalized.id ? normalized : entry))
+            : [...current.homes, normalized],
+        };
+      });
+      setFirebaseNotice("Unterkunft wurde gespeichert.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function saveAvailability(availability) {
-    const home = state.homes.find((entry) => entry.id === availability.homeId);
-    const normalized = {
-      ...availability,
-      ownerId: home?.ownerId ?? currentProfile.id,
-    };
-
-    await saveRecord("availabilities", normalized);
-    updateState((current) => {
-      const exists = current.availabilities.some((entry) => entry.id === normalized.id);
-      return {
-        ...current,
-        availabilities: exists
-          ? current.availabilities.map((entry) => (entry.id === normalized.id ? normalized : entry))
-          : [...current.availabilities, normalized],
+    try {
+      setFirebaseError("");
+      const home = state.homes.find((entry) => entry.id === availability.homeId);
+      const normalized = {
+        ...availability,
+        ownerId: home?.ownerId ?? currentProfile.id,
       };
-    });
+
+      await saveRecord("availabilities", normalized);
+      updateState((current) => {
+        const exists = current.availabilities.some((entry) => entry.id === normalized.id);
+        return {
+          ...current,
+          availabilities: exists
+            ? current.availabilities.map((entry) => (entry.id === normalized.id ? normalized : entry))
+            : [...current.availabilities, normalized],
+        };
+      });
+      setFirebaseNotice("Zeitraum wurde gespeichert.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function deleteAvailability(id) {
-    await removeRecord("availabilities", id);
-    updateState((current) => ({
-      ...current,
-      availabilities: current.availabilities.filter((availability) => availability.id !== id),
-    }));
+    try {
+      setFirebaseError("");
+      await removeRecord("availabilities", id);
+      updateState((current) => ({
+        ...current,
+        availabilities: current.availabilities.filter((availability) => availability.id !== id),
+      }));
+      setFirebaseNotice("Zeitraum wurde geloescht.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function createRequest(draft) {
-    const targetHome = state.homes.find((home) => home.id === draft.homeId);
-    const request = {
-      id: createId("request"),
-      fromUserId: currentProfile.id,
-      toUserId: targetHome.ownerId,
-      homeId: draft.homeId,
-      start: draft.start,
-      end: draft.end,
-      guests: Number(draft.guests),
-      status: "pending",
-      messages: [
-        {
-          authorId: currentProfile.id,
-          text: draft.message || "Wir wuerden diesen Zeitraum gern tauschen.",
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    };
+    try {
+      setFirebaseError("");
+      const targetHome = state.homes.find((home) => home.id === draft.homeId);
+      const request = {
+        id: createId("request"),
+        fromUserId: currentProfile.id,
+        toUserId: targetHome.ownerId,
+        homeId: draft.homeId,
+        start: draft.start,
+        end: draft.end,
+        guests: Number(draft.guests),
+        status: "pending",
+        messages: [
+          {
+            authorId: currentProfile.id,
+            text: draft.message || "Wir wuerden diesen Zeitraum gern tauschen.",
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      };
 
-    await saveRecord("exchangeRequests", request);
-    updateState((current) => ({ ...current, requests: [...current.requests, request] }));
-    setRequestDraft(null);
-    setActiveTab("requests");
+      await saveRecord("exchangeRequests", request);
+      updateState((current) => ({ ...current, requests: [...current.requests, request] }));
+      setRequestDraft(null);
+      setActiveTab("requests");
+      setFirebaseNotice("Tauschanfrage wurde gespeichert.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function updateRequestStatus(id, status) {
-    await patchRecord("exchangeRequests", id, { status });
-    updateState((current) => ({
-      ...current,
-      requests: current.requests.map((request) => (request.id === id ? { ...request, status } : request)),
-    }));
+    try {
+      setFirebaseError("");
+      await patchRecord("exchangeRequests", id, { status });
+      updateState((current) => ({
+        ...current,
+        requests: current.requests.map((request) => (request.id === id ? { ...request, status } : request)),
+      }));
+      setFirebaseNotice("Anfragestatus wurde gespeichert.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function addRequestMessage(id, text) {
-    const request = state.requests.find((entry) => entry.id === id);
-    const messages = [
-      ...request.messages,
-      {
-        authorId: currentProfile.id,
-        text,
-        createdAt: new Date().toISOString(),
-      },
-    ];
-    await patchRecord("exchangeRequests", id, { messages });
-    updateState((current) => ({
-      ...current,
-      requests: current.requests.map((entry) => (entry.id === id ? { ...entry, messages } : entry)),
-    }));
+    try {
+      setFirebaseError("");
+      const request = state.requests.find((entry) => entry.id === id);
+      const messages = [
+        ...request.messages,
+        {
+          authorId: currentProfile.id,
+          text,
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      await patchRecord("exchangeRequests", id, { messages });
+      updateState((current) => ({
+        ...current,
+        requests: current.requests.map((entry) => (entry.id === id ? { ...entry, messages } : entry)),
+      }));
+      setFirebaseNotice("Nachricht wurde gespeichert.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function saveProfile(profile) {
-    await saveRecord("profiles", profile);
-    updateState((current) => ({
-      ...current,
-      profiles: current.profiles.map((entry) => (entry.id === profile.id ? profile : entry)),
-    }));
+    try {
+      setFirebaseError("");
+      await saveRecord("profiles", profile);
+      updateState((current) => ({
+        ...current,
+        profiles: current.profiles.map((entry) => (entry.id === profile.id ? profile : entry)),
+      }));
+      setFirebaseNotice("Profil wurde gespeichert.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function toggleAdmin(profileId) {
@@ -430,21 +473,33 @@ function App() {
   }
 
   async function deleteHome(id) {
-    await removeRecord("homes", id);
-    updateState((current) => ({
-      ...current,
-      homes: current.homes.filter((home) => home.id !== id),
-      availabilities: current.availabilities.filter((availability) => availability.homeId !== id),
-    }));
+    try {
+      setFirebaseError("");
+      await removeRecord("homes", id);
+      updateState((current) => ({
+        ...current,
+        homes: current.homes.filter((home) => home.id !== id),
+        availabilities: current.availabilities.filter((availability) => availability.homeId !== id),
+      }));
+      setFirebaseNotice("Unterkunft wurde geloescht.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   async function deleteProfile(id) {
-    await removeRecord("profiles", id);
-    updateState((current) => ({
-      ...current,
-      profiles: current.profiles.filter((profile) => profile.id !== id),
-      homes: current.homes.filter((home) => home.ownerId !== id),
-    }));
+    try {
+      setFirebaseError("");
+      await removeRecord("profiles", id);
+      updateState((current) => ({
+        ...current,
+        profiles: current.profiles.filter((profile) => profile.id !== id),
+        homes: current.homes.filter((home) => home.ownerId !== id),
+      }));
+      setFirebaseNotice("Profil wurde geloescht.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
   }
 
   if (firebaseEnabled && !authChecked) {
@@ -527,6 +582,7 @@ function App() {
             message="Firebase-Konfiguration ist unvollstaendig. Bitte alle VITE_FIREBASE_ Variablen in Vercel pruefen und neu deployen."
           />
         )}
+        {firebaseNotice && <FirebaseSuccessBanner message={firebaseNotice} onDismiss={() => setFirebaseNotice("")} />}
         {firebaseError && <FirebaseErrorBanner message={firebaseError} onDismiss={() => setFirebaseError("")} />}
         {activeTab === "discover" && (
           <DiscoverView
@@ -681,6 +737,17 @@ function FirebaseErrorBanner({ message, onDismiss }) {
           Schliessen
         </button>
       )}
+    </div>
+  );
+}
+
+function FirebaseSuccessBanner({ message, onDismiss }) {
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[#b8d8b1] bg-[#e8f6e5] p-3 text-sm text-[#255c37] sm:flex-row sm:items-center sm:justify-between">
+      <strong>{message}</strong>
+      <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 font-semibold" onClick={onDismiss}>
+        Schliessen
+      </button>
     </div>
   );
 }
