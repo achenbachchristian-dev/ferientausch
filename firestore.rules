@@ -27,8 +27,17 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (
           profileId == request.auth.uid
-          && request.resource.data.isAdmin == resource.data.isAdmin
-          && request.resource.data.approved == resource.data.approved
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "firstName",
+            "lastName",
+            "familyName",
+            "city",
+            "email",
+            "description",
+            "phone",
+            "photoUrl",
+            "visibility"
+          ])
         );
       allow delete: if isAdmin() && profileId != request.auth.uid;
     }

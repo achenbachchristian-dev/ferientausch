@@ -1179,15 +1179,28 @@ function App() {
     try {
       setFirebaseError("");
       const previousProfile = state.profiles.find((entry) => entry.id === profile.id);
-      await saveRecord("profiles", profile);
-      if (previousProfile?.photoUrl && previousProfile.photoUrl !== profile.photoUrl) {
+      const normalized = {
+        ...profile,
+        phone: String(profile.phone ?? "").trim(),
+      };
+
+      if (!currentProfile?.isAdmin && previousProfile) {
+        normalized.isAdmin = previousProfile.isAdmin;
+        normalized.approved = previousProfile.approved;
+        normalized.approvedAt = previousProfile.approvedAt;
+        normalized.approvedBy = previousProfile.approvedBy;
+        normalized.notifyOnNewRegistrations = previousProfile.notifyOnNewRegistrations;
+      }
+
+      await saveRecord("profiles", normalized);
+      if (previousProfile?.photoUrl && previousProfile.photoUrl !== normalized.photoUrl) {
         await removeStorageFile(previousProfile.photoUrl).catch(() => null);
       }
       updateState((current) => ({
         ...current,
-        profiles: current.profiles.map((entry) => (entry.id === profile.id ? profile : entry)),
+        profiles: current.profiles.map((entry) => (entry.id === normalized.id ? normalized : entry)),
       }));
-      await logAudit("Profil gespeichert", "profile", profile.id, getProfileName(profile));
+      await logAudit("Profil gespeichert", "profile", normalized.id, getProfileName(normalized));
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
