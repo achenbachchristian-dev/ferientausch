@@ -1600,7 +1600,6 @@ function DiscoverView({
             </select>
           </label>
         </div>
-        {uploadNote && <p className="mt-2 text-xs font-semibold text-[#66756d]">{uploadNote}</p>}
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {homes.map((home) => {
