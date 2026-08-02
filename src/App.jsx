@@ -670,12 +670,12 @@ function App() {
             <div className="rounded-lg bg-white px-3 py-2">
               <img className="h-12 w-auto max-w-[240px] object-contain" src="/logo-wordmark.png" alt="FerienTausch" />
             </div>
-            <div className="hidden sm:block">
-              <p className="text-xs font-bold uppercase text-[#6e7a72]">Privater Haustausch im Freundeskreis</p>
-              <p className="text-sm text-[#5f6e67]">{getProfileName(currentProfile)} aus {currentProfile.city || "dem Freundeskreis"}</p>
-            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="rounded-lg bg-[#f8faf5] px-3 py-2 text-right">
+              <p className="text-sm font-bold text-[#24313a]">{getProfileName(currentProfile)}</p>
+              <p className="text-xs text-[#66756d]">{currentProfile.city || "Freundeskreis"}</p>
+            </div>
             <Pill tone={firebaseEnabled ? "green" : "amber"}>{firebaseEnabled ? "Firebase aktiv" : "Demo-Modus"}</Pill>
             {currentProfile.isAdmin && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
