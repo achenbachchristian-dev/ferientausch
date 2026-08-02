@@ -158,6 +158,32 @@ function App() {
     );
   }, [currentProfile?.isAdmin, currentUserId]);
 
+  useEffect(() => {
+    if (!firebaseEnabled || !currentUserId || currentProfile || !auth?.currentUser) {
+      return;
+    }
+
+    const repairTimer = window.setTimeout(async () => {
+      try {
+        setFirebaseError("");
+        const email = auth.currentUser.email ?? "";
+        const fallbackName = email ? `Familie ${email.split("@")[0]}` : "Neue Familie";
+        await saveRecord("profiles", {
+          id: currentUserId,
+          familyName: auth.currentUser.displayName || fallbackName,
+          city: "",
+          email,
+          description: "Neu im FerienTausch.",
+          isAdmin: false,
+        });
+      } catch (error) {
+        setFirebaseError(formatFirebaseError(error));
+      }
+    }, 2500);
+
+    return () => window.clearTimeout(repairTimer);
+  }, [currentProfile, currentUserId]);
+
   const ownedHomes = useMemo(() => {
     if (!currentProfile) {
       return [];
