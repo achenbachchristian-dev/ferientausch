@@ -2411,15 +2411,8 @@ function AdminView({
   const bookings = mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]);
   const pendingProfiles = state.profiles.filter((profile) => !isProfileApproved(profile));
   const openRequests = state.requests.filter((request) => request.status === "pending");
-  const staleAvailabilities = state.availabilities.filter((availability) => availability.end < todayIso());
-  const homesWithoutAvailability = state.homes.filter(
-    (home) => !state.availabilities.some((availability) => availability.homeId === home.id && availability.end >= todayIso()),
-  );
   const incompleteHomes = state.homes
     .map((home) => ({ home, issues: getHomeQualityIssues(home) }))
-    .filter((entry) => entry.issues.length);
-  const incompleteProfiles = state.profiles
-    .map((profile) => ({ profile, issues: getProfileQualityIssues(profile) }))
     .filter((entry) => entry.issues.length);
   function openAdminHome(home) {
     setAdminHomeDraft(home);
@@ -2441,33 +2434,12 @@ function AdminView({
       action: "Anfragen öffnen",
       onClick: () => setAdminSection("requests"),
     })),
-    ...homesWithoutAvailability.map((home) => ({
-      id: `availability-${home.id}`,
-      title: `${home.title || "Unterkunft"} ohne aktive freie Zeiträume`,
-      text: home.region || home.city || "Bitte Verfügbarkeit prüfen.",
-      action: "Häuser öffnen",
-      onClick: () => openAdminHome(home),
-    })),
     ...incompleteHomes.slice(0, 6).map(({ home, issues }) => ({
       id: `quality-home-${home.id}`,
       title: `${home.title || "Unterkunft"} vervollständigen`,
       text: issues.join(", "),
       action: "Häuser öffnen",
       onClick: () => openAdminHome(home),
-    })),
-    ...incompleteProfiles.slice(0, 6).map(({ profile, issues }) => ({
-      id: `quality-profile-${profile.id}`,
-      title: `${getProfileName(profile)} Profil ergänzen`,
-      text: issues.join(", "),
-      action: "Mitglieder öffnen",
-      onClick: () => setAdminSection("members"),
-    })),
-    ...staleAvailabilities.slice(0, 6).map((availability) => ({
-      id: `stale-${availability.id}`,
-      title: "Abgelaufenen Zeitraum prüfen",
-      text: `${availability.title || "Zeitraum"} · ${formatDateRange(availability.start, availability.end)}`,
-      action: "Buchungen öffnen",
-      onClick: () => setAdminSection("bookings"),
     })),
   ];
 
