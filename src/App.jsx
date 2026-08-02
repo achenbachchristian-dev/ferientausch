@@ -2401,6 +2401,7 @@ function AdminView({
     isExternal: true,
   });
   const [adminHomeDraft, setAdminHomeDraft] = useState(null);
+  const [showExternalHomeEditor, setShowExternalHomeEditor] = useState(false);
   const [inviteDraft, setInviteDraft] = useState(inviteCode);
   const adminTabs = [
     { id: "overview", label: "Übersicht" },
@@ -2583,19 +2584,36 @@ function AdminView({
       </section>
       )}
       {adminSection === "homes" && (
-      <section className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
-        <div className="rounded-lg bg-white p-4 shadow-soft">
-          <h2 className="text-xl font-bold">Haus für Dritte eintragen</h2>
-          <HouseEditor
-            compact
-            value={externalHome}
-            onChange={setExternalHome}
-            onUploadPhoto={onUploadPhoto}
-            onSave={(home) => {
-              onSaveHome({ ...home, isExternal: true, managedBy: currentProfile.id });
-              setExternalHome({ ...blankHouse, id: createId("home"), ownerId: createId("external"), managedBy: currentProfile.id, isExternal: true });
-            }}
-          />
+      <section className="grid gap-5 lg:grid-cols-[0.75fr_1.25fr]">
+        <div className="rounded-lg bg-white p-4 shadow-soft lg:col-span-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold">Häuser verwalten</h2>
+              <p className="mt-1 text-sm text-[#66756d]">Bestehende Häuser links auswählen und rechts direkt bearbeiten.</p>
+            </div>
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 text-sm font-semibold"
+              onClick={() => setShowExternalHomeEditor((current) => !current)}
+              type="button"
+            >
+              <Plus size={17} /> Haus für Dritte
+            </button>
+          </div>
+          {showExternalHomeEditor && (
+            <div className="mt-4 border-t border-[#edf0ea] pt-4">
+              <HouseEditor
+                compact
+                value={externalHome}
+                onChange={setExternalHome}
+                onUploadPhoto={onUploadPhoto}
+                onSave={(home) => {
+                  onSaveHome({ ...home, isExternal: true, managedBy: currentProfile.id });
+                  setExternalHome({ ...blankHouse, id: createId("home"), ownerId: createId("external"), managedBy: currentProfile.id, isExternal: true });
+                  setShowExternalHomeEditor(false);
+                }}
+              />
+            </div>
+          )}
         </div>
         <div>
           <h2 className="mb-3 text-xl font-bold">Alle Unterkünfte</h2>
@@ -2624,7 +2642,7 @@ function AdminView({
           </div>
         </div>
         {adminHomeDraft && (
-          <div className="rounded-lg bg-white p-4 shadow-soft lg:col-span-2">
+          <div className="rounded-lg bg-white p-4 shadow-soft lg:sticky lg:top-32 lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-xl font-bold">Unterkunft als Admin bearbeiten</h2>
