@@ -1286,6 +1286,8 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onToggleAd
 }
 
 function HomeCard({ home, availabilities, disabled, onRequest }) {
+  const [showMap, setShowMap] = useState(false);
+
   return (
     <article className="group overflow-hidden rounded-lg border border-white bg-white shadow-soft transition hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(32,45,54,0.16)]">
       <div className="relative aspect-[4/3] bg-[#dfe5dc]">
@@ -1310,7 +1312,8 @@ function HomeCard({ home, availabilities, disabled, onRequest }) {
           <Fact icon={Bath} label={`${home.bathrooms} Bad`} />
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          {home.amenities.slice(0, 5).map((amenity) => <Pill key={amenity}>{amenity}</Pill>)}
+          {home.amenities.slice(0, 8).map((amenity) => <Pill key={amenity}>{amenity}</Pill>)}
+          {home.amenities.length > 8 && <Pill>+{home.amenities.length - 8}</Pill>}
         </div>
         <div className="mt-4 space-y-2">
           {availabilities.slice(0, 2).map((availability) => (
@@ -1326,6 +1329,14 @@ function HomeCard({ home, availabilities, disabled, onRequest }) {
           )}
         </div>
         <button
+          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-4 text-sm font-semibold text-[#24313a] hover:bg-[#edf1e8]"
+          onClick={() => setShowMap((current) => !current)}
+          type="button"
+        >
+          <MapPin size={17} /> {showMap ? "Karte ausblenden" : "Karte anzeigen"}
+        </button>
+        {showMap && <MapPreview home={home} />}
+        <button
           className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
           disabled={disabled}
           onClick={onRequest}
@@ -1334,6 +1345,43 @@ function HomeCard({ home, availabilities, disabled, onRequest }) {
         </button>
       </div>
     </article>
+  );
+}
+
+function MapPreview({ home }) {
+  const query = [home.address, home.city].filter(Boolean).join(", ");
+
+  if (!query) {
+    return (
+      <div className="mt-2 rounded-lg border border-dashed border-[#d9dfd5] bg-[#f8faf5] p-4 text-sm text-[#66756d]">
+        Kartenansicht erscheint, sobald Adresse oder Stadt eingetragen ist.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border border-[#dce3d8] bg-[#edf1e8]">
+      <div className="flex items-center justify-between gap-3 border-b border-[#dce3d8] bg-white px-3 py-2 text-sm">
+        <span className="inline-flex items-center gap-2 font-semibold text-[#24313a]">
+          <MapPin size={16} /> {query}
+        </span>
+        <a
+          className="font-semibold text-[#2d6a62]"
+          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          In Maps oeffnen
+        </a>
+      </div>
+      <iframe
+        className="h-56 w-full border-0"
+        title={`Google Maps: ${query}`}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        src={`https://www.google.com/maps?q=${encodeURIComponent(query)}&output=embed`}
+      />
+    </div>
   );
 }
 
@@ -1429,6 +1477,10 @@ function HouseEditor({ value, onChange, onSave, onDelete, compact = false }) {
             <input className="sr-only" type="file" accept="image/*" onChange={handleFile} />
           </label>
         </div>
+      </div>
+      <div className="mt-4">
+        <span className="text-sm font-semibold">Kartenansicht</span>
+        <MapPreview home={value} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         <button className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white" onClick={() => onSave(value)}>

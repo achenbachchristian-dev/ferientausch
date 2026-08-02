@@ -9,6 +9,25 @@ export const amenityOptions = [
   "Meerblick",
   "Fahrräder",
   "Arbeitsplatz",
+  "Parkplatz",
+  "E-Ladestation",
+  "Balkon",
+  "Terrasse",
+  "Grill",
+  "Spuelmaschine",
+  "Waschmaschine",
+  "Trockner",
+  "Klimaanlage",
+  "Babybett",
+  "Hochstuhl",
+  "Spielplatz in der Naehe",
+  "Barrierearm",
+  "OePNV in der Naehe",
+  "See in der Naehe",
+  "Skikeller",
+  "Bergblick",
+  "Strandnaehe",
+  "Home Cinema",
 ];
 
 export const demoProfiles = [
@@ -55,7 +74,7 @@ export const demoHomes = [
     bedrooms: 3,
     bathrooms: 2,
     description: "Helles Reihenhaus mit ruhigem Garten, Spielzimmer und schneller Verbindung in die Innenstadt.",
-    amenities: ["WLAN", "Garten", "Kinderfreundlich", "Fahrräder", "Arbeitsplatz"],
+    amenities: ["WLAN", "Garten", "Kinderfreundlich", "Fahrräder", "Arbeitsplatz", "Parkplatz", "Spuelmaschine", "Waschmaschine", "Hochstuhl"],
     photos: [
       "https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=1200&q=80",
       "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80",
@@ -73,7 +92,7 @@ export const demoHomes = [
     bedrooms: 3,
     bathrooms: 1,
     description: "Grosszuegige Wohnung mit Balkon, Cafes vor der Tuer und U-Bahn in Laufweite.",
-    amenities: ["WLAN", "Kinderfreundlich", "Haustiere erlaubt", "Fahrräder"],
+    amenities: ["WLAN", "Kinderfreundlich", "Haustiere erlaubt", "Fahrräder", "Balkon", "Spuelmaschine", "OePNV in der Naehe"],
     photos: [
       "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=1200&q=80",
       "https://images.unsplash.com/photo-1560184897-ae75f418493e?auto=format&fit=crop&w=1200&q=80",
@@ -91,7 +110,7 @@ export const demoHomes = [
     bedrooms: 4,
     bathrooms: 2,
     description: "Holzhaus mit Sauna, Terrasse und Wanderwegen direkt hinter dem Garten.",
-    amenities: ["WLAN", "Garten", "Kamin", "Sauna", "Kinderfreundlich"],
+    amenities: ["WLAN", "Garten", "Kamin", "Sauna", "Kinderfreundlich", "Terrasse", "Grill", "Bergblick", "Parkplatz"],
     photos: [
       "https://images.unsplash.com/photo-1518780664697-55e3ad937233?auto=format&fit=crop&w=1200&q=80",
       "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80",
@@ -109,7 +128,7 @@ export const demoHomes = [
     bedrooms: 2,
     bathrooms: 1,
     description: "Vom Admin gepflegte Ferienwohnung fuer nicht registrierte Verwandte.",
-    amenities: ["WLAN", "Meerblick", "Kinderfreundlich"],
+    amenities: ["WLAN", "Meerblick", "Kinderfreundlich", "Strandnaehe", "Balkon", "Parkplatz"],
     photos: [
       "https://images.unsplash.com/photo-1499793983690-e29da59ef1c2?auto=format&fit=crop&w=1200&q=80",
     ],
