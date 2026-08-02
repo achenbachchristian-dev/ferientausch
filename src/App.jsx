@@ -2400,6 +2400,7 @@ function AdminView({
     managedBy: currentProfile.id,
     isExternal: true,
   });
+  const [adminHomeDraft, setAdminHomeDraft] = useState(null);
   const [inviteDraft, setInviteDraft] = useState(inviteCode);
   const adminTabs = [
     { id: "overview", label: "Übersicht" },
@@ -2472,6 +2473,21 @@ function AdminView({
   useEffect(() => {
     setInviteDraft(inviteCode);
   }, [inviteCode]);
+
+  useEffect(() => {
+    if (adminSection !== "homes") {
+      return;
+    }
+
+    if (!adminHomeDraft && state.homes.length) {
+      setAdminHomeDraft(state.homes[0]);
+      return;
+    }
+
+    if (adminHomeDraft && !state.homes.some((home) => home.id === adminHomeDraft.id)) {
+      setAdminHomeDraft(state.homes[0] ?? null);
+    }
+  }, [adminHomeDraft, adminSection, state.homes]);
 
   async function updateRegistrationNotificationPreference(enabled) {
     if (enabled) {
@@ -2567,7 +2583,7 @@ function AdminView({
       </section>
       )}
       {adminSection === "homes" && (
-      <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+      <section className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
         <div className="rounded-lg bg-white p-4 shadow-soft">
           <h2 className="text-xl font-bold">Haus für Dritte eintragen</h2>
           <HouseEditor
@@ -2585,18 +2601,58 @@ function AdminView({
           <h2 className="mb-3 text-xl font-bold">Alle Unterkünfte</h2>
           <div className="grid gap-3">
             {state.homes.map((home) => (
-              <div key={home.id} className="flex items-center justify-between gap-3 rounded-lg bg-white p-3 shadow-soft">
+              <div
+                key={home.id}
+                className={`flex items-center justify-between gap-3 rounded-lg bg-white p-3 shadow-soft ${
+                  adminHomeDraft?.id === home.id ? "ring-2 ring-[#2d6a62]/30" : ""
+                }`}
+              >
                 <div>
                   <strong>{home.title}</strong>
                   <p className="text-sm text-[#66756d]">{home.region || home.city} · {home.city} {home.isExternal ? "· extern gepflegt" : ""}</p>
                 </div>
-                <IconButton label="Unterkunft löschen" onClick={() => onDeleteHome(home.id)}>
-                  <Trash2 size={18} />
-                </IconButton>
+                <div className="flex gap-2">
+                  <IconButton label="Unterkunft bearbeiten" onClick={() => setAdminHomeDraft(home)}>
+                    <Pencil size={18} />
+                  </IconButton>
+                  <IconButton label="Unterkunft löschen" onClick={() => onDeleteHome(home.id)}>
+                    <Trash2 size={18} />
+                  </IconButton>
+                </div>
               </div>
             ))}
           </div>
         </div>
+        {adminHomeDraft && (
+          <div className="rounded-lg bg-white p-4 shadow-soft lg:col-span-2">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold">Unterkunft als Admin bearbeiten</h2>
+                <p className="mt-1 text-sm text-[#66756d]">{adminHomeDraft.title || "Ausgewählte Unterkunft"}</p>
+              </div>
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 text-sm font-semibold"
+                onClick={() => setAdminHomeDraft(null)}
+                type="button"
+              >
+                <X size={17} /> Schliessen
+              </button>
+            </div>
+            <HouseEditor
+              value={adminHomeDraft}
+              onChange={setAdminHomeDraft}
+              onUploadPhoto={onUploadPhoto}
+              onSave={(home) => {
+                onSaveHome({ ...home, managedBy: home.managedBy ?? currentProfile.id });
+                setAdminHomeDraft(home);
+              }}
+              onDelete={(homeId) => {
+                onDeleteHome(homeId);
+                setAdminHomeDraft(null);
+              }}
+            />
+          </div>
+        )}
       </section>
       )}
       {adminSection === "overview" && pendingProfiles.length > 0 && (
