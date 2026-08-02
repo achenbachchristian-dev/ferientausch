@@ -1339,11 +1339,6 @@ function App() {
                 <p className="text-xs text-[#66756d]">{currentProfile.city || "Freundeskreis"}</p>
               </div>
             </div>
-            {currentProfile.isAdmin && (
-              <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
-                <ShieldCheck size={18} /> Admin
-              </button>
-            )}
             <IconButton label="Abmelden" onClick={handleLogout}>
               <LogOut size={18} />
             </IconButton>
