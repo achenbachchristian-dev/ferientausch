@@ -120,6 +120,14 @@ function mergeBookings(bookings = []) {
   return Array.from(merged.values()).sort((first, second) => first.start.localeCompare(second.start));
 }
 
+function getHomeBookingStatus(bookableAvailabilities = [], bookings = []) {
+  if (!bookings.length) {
+    return null;
+  }
+
+  return bookableAvailabilities.length ? "partial" : "booked";
+}
+
 function getHomePhotos(home) {
   return Array.isArray(home?.photos) ? home.photos.filter(Boolean) : [];
 }
@@ -1619,7 +1627,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
 function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disabled, onDetails, onRequest }) {
   const [showMap, setShowMap] = useState(false);
   const requestDisabled = disabled || !bookableAvailabilities.length;
-  const nextBooking = bookings[0];
+  const homeBookingStatus = getHomeBookingStatus(bookableAvailabilities, bookings);
 
   return (
     <article className="group overflow-hidden rounded-lg border border-white bg-white shadow-soft transition hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(32,45,54,0.16)]">
@@ -1628,7 +1636,7 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
         <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent" />
         <div className="absolute left-3 top-3 flex gap-2">
           {home.isExternal && <Pill tone="amber">Extern</Pill>}
-          {nextBooking && <Pill tone="red">Gebucht</Pill>}
+          {homeBookingStatus && <AvailabilityStatePill status={homeBookingStatus} />}
         </div>
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3 text-white">
           <div>
@@ -1710,13 +1718,17 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
   const selectedCaption = getPhotoCaption(home, selectedPhotoIndex);
   const bookableAvailabilities = getBookableAvailabilities(availabilities, bookings);
   const requestDisabled = disabled || !bookableAvailabilities.length;
+  const homeBookingStatus = getHomeBookingStatus(bookableAvailabilities, bookings);
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/45 p-3 sm:place-items-center">
       <section className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-soft scrollbar-thin">
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-[#edf0ea] bg-white px-4 py-3">
           <div>
-            <h2 className="text-xl font-bold">{home.title}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-bold">{home.title}</h2>
+              {homeBookingStatus && <AvailabilityStatePill status={homeBookingStatus} />}
+            </div>
             <p className="text-sm text-[#66756d]">{home.city} · {owner ? getProfileName(owner) : "Privates Angebot"}</p>
           </div>
           <IconButton label="Schliessen" onClick={onClose}>
