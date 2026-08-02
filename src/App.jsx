@@ -667,12 +667,11 @@ function App() {
       <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-[#f7f4ed]/95 shadow-[0_10px_30px_rgba(36,49,58,0.06)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-lg bg-white p-1 shadow-soft">
-              <img className="h-full w-full object-contain" src="/logo-mark.png" alt="FerienTausch" />
+            <div className="rounded-lg bg-white px-3 py-2 shadow-soft">
+              <img className="h-12 w-auto max-w-[240px] object-contain" src="/logo-wordmark.png" alt="FerienTausch" />
             </div>
-            <div>
+            <div className="hidden sm:block">
               <p className="text-xs font-bold uppercase text-[#6e7a72]">Privater Haustausch im Freundeskreis</p>
-              <h1 className="text-2xl font-bold tracking-normal">FerienTausch</h1>
               <p className="text-sm text-[#5f6e67]">{getProfileName(currentProfile)} aus {currentProfile.city || "dem Freundeskreis"}</p>
             </div>
           </div>
@@ -1701,6 +1700,13 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
     event.target.value = "";
   }
 
+  const photos = getHomePhotos(value);
+  const coverPhotoIndex = photos.length
+    ? Math.min(Math.max(Number(value.coverPhotoIndex ?? 0), 0), photos.length - 1)
+    : 0;
+  const coverPhoto = photos[coverPhotoIndex];
+  const coverCaption = getPhotoCaption(value, coverPhotoIndex);
+
   return (
     <section className={compact ? "" : "rounded-lg bg-white p-5 shadow-soft"}>
       {!compact && <h2 className="mb-4 text-xl font-bold">Unterkunft bearbeiten</h2>}
@@ -1743,18 +1749,39 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
       </div>
       <div className="mt-4">
         <span className="text-sm font-semibold">Bildergalerie</span>
+        <div className="mt-2 rounded-lg border border-[#dce3d8] bg-[#f8faf5] p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="aspect-[4/3] w-full overflow-hidden rounded-lg bg-[#edf1e8] sm:w-44">
+              {coverPhoto ? (
+                <img className="h-full w-full object-cover" src={coverPhoto} alt="" />
+              ) : (
+                <div className="grid h-full place-items-center px-3 text-center text-sm text-[#66756d]">
+                  Noch kein Titelbild
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-bold text-[#24313a]">Aktuelles Titelbild</p>
+              <p className="mt-1 text-sm text-[#66756d]">
+                {coverPhoto ? coverCaption || `Bild ${coverPhotoIndex + 1}` : "Waehle ein Bild aus der Galerie als Titelbild aus."}
+              </p>
+              <p className="mt-2 text-xs font-semibold uppercase text-[#6e7a72]">
+                Dieses Bild erscheint auf Hauskarten, Dashboard und als erstes Bild in der Detailansicht.
+              </p>
+            </div>
+          </div>
+        </div>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {getHomePhotos(value).map((photo, index) => (
-            <div key={`${photo}-${index}`} className={`rounded-lg border bg-white p-2 ${Number(value.coverPhotoIndex ?? 0) === index ? "border-[#2d6a62]" : "border-[#edf0ea]"}`}>
+          {photos.map((photo, index) => (
+            <div key={`${photo}-${index}`} className={`rounded-lg border bg-white p-2 ${coverPhotoIndex === index ? "border-[#2d6a62] shadow-[0_0_0_2px_rgba(45,106,98,0.12)]" : "border-[#edf0ea]"}`}>
               <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#edf1e8]">
                 <img className="h-full w-full object-cover" src={photo} alt="" />
-                {Number(value.coverPhotoIndex ?? 0) === index && (
-                  <span className="absolute left-2 top-2 rounded-lg bg-white/92 px-2 py-1 text-xs font-bold text-[#255c37]">Titelbild</span>
+                {coverPhotoIndex === index && (
+                  <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-lg bg-white/92 px-2 py-1 text-xs font-bold text-[#255c37]">
+                    <Check size={13} /> Titelbild
+                  </span>
                 )}
                 <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1">
-                  <button type="button" className="rounded-lg bg-white/92 px-2 py-1 text-xs font-bold" onClick={() => updatePhotos(getHomePhotos(value), index)}>
-                    Titel
-                  </button>
                   <button
                     type="button"
                     className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 disabled:opacity-45"
@@ -1807,6 +1834,17 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
                 onChange={(event) => updatePhotoCaption(index, event.target.value)}
                 placeholder="Bildname, z. B. Wohnzimmer"
               />
+              <button
+                type="button"
+                className={`mt-2 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold ${
+                  coverPhotoIndex === index
+                    ? "bg-[#dcedd8] text-[#255c37]"
+                    : "border border-[#cfd7cd] bg-white text-[#24313a] hover:bg-[#edf1e8]"
+                }`}
+                onClick={() => updatePhotos(photos, index)}
+              >
+                <Check size={16} /> {coverPhotoIndex === index ? "Ist Titelbild" : "Als Titelbild verwenden"}
+              </button>
             </div>
           ))}
         </div>
