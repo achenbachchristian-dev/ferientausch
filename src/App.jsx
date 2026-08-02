@@ -804,7 +804,6 @@ function App() {
               <p className="text-sm font-bold text-[#24313a]">{getProfileName(currentProfile)}</p>
               <p className="text-xs text-[#66756d]">{currentProfile.city || "Freundeskreis"}</p>
             </div>
-            <Pill tone={firebaseEnabled ? "green" : "amber"}>{firebaseEnabled ? "Firebase aktiv" : "Demo-Modus"}</Pill>
             {currentProfile.isAdmin && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
                 <ShieldCheck size={18} /> Admin
@@ -913,6 +912,11 @@ function App() {
           />
         )}
       </main>
+      <footer className="px-4 pb-5 text-center sm:px-6">
+        <span className="inline-flex rounded-lg bg-white/55 px-3 py-1 text-xs font-semibold text-[#8a948d]">
+          {firebaseEnabled ? "Firebase aktiv" : "Demo-Modus"}
+        </span>
+      </footer>
 
       {requestDraft && (
         <RequestPanel
