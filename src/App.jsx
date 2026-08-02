@@ -2421,6 +2421,11 @@ function AdminView({
   const incompleteProfiles = state.profiles
     .map((profile) => ({ profile, issues: getProfileQualityIssues(profile) }))
     .filter((entry) => entry.issues.length);
+  function openAdminHome(home) {
+    setAdminHomeDraft(home);
+    setAdminSection("homes");
+  }
+
   const adminTasks = [
     ...pendingProfiles.map((profile) => ({
       id: `profile-${profile.id}`,
@@ -2441,14 +2446,14 @@ function AdminView({
       title: `${home.title || "Unterkunft"} ohne aktive freie Zeiträume`,
       text: home.region || home.city || "Bitte Verfügbarkeit prüfen.",
       action: "Häuser öffnen",
-      onClick: () => setAdminSection("homes"),
+      onClick: () => openAdminHome(home),
     })),
     ...incompleteHomes.slice(0, 6).map(({ home, issues }) => ({
       id: `quality-home-${home.id}`,
       title: `${home.title || "Unterkunft"} vervollständigen`,
       text: issues.join(", "),
       action: "Häuser öffnen",
-      onClick: () => setAdminSection("homes"),
+      onClick: () => openAdminHome(home),
     })),
     ...incompleteProfiles.slice(0, 6).map(({ profile, issues }) => ({
       id: `quality-profile-${profile.id}`,
@@ -2471,19 +2476,10 @@ function AdminView({
   }, [inviteCode]);
 
   useEffect(() => {
-    if (adminSection !== "homes") {
-      return;
-    }
-
-    if (!adminHomeDraft && state.homes.length) {
-      setAdminHomeDraft(state.homes[0]);
-      return;
-    }
-
     if (adminHomeDraft && !state.homes.some((home) => home.id === adminHomeDraft.id)) {
-      setAdminHomeDraft(state.homes[0] ?? null);
+      setAdminHomeDraft(null);
     }
-  }, [adminHomeDraft, adminSection, state.homes]);
+  }, [adminHomeDraft, state.homes]);
 
   async function updateRegistrationNotificationPreference(enabled) {
     if (enabled) {
@@ -2664,6 +2660,11 @@ function AdminView({
                 setAdminHomeDraft(null);
               }}
             />
+          </div>
+        )}
+        {!adminHomeDraft && (
+          <div className="rounded-lg bg-white p-4 shadow-soft">
+            <EmptyState title="Kein Haus ausgewählt" text="Wähle links ein Haus aus oder öffne ein Haus direkt aus den Admin-Aufgaben." />
           </div>
         )}
       </section>
