@@ -84,6 +84,15 @@ const emptyState = {
   requests: [],
 };
 
+function getProfileName(profile) {
+  if (!profile) {
+    return "Unbekannt";
+  }
+
+  const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
+  return fullName || profile.familyName || profile.email || "Unbekannt";
+}
+
 function App() {
   const [state, setState] = useState(() => (firebaseEnabled ? emptyState : loadLocalState()));
   const [currentUserId, setCurrentUserId] = useState(() =>
@@ -167,9 +176,11 @@ function App() {
       try {
         setFirebaseError("");
         const email = auth.currentUser.email ?? "";
-        const fallbackName = email ? `Familie ${email.split("@")[0]}` : "Neue Familie";
+        const fallbackName = email ? email.split("@")[0] : "Neue Familie";
         await saveRecord("profiles", {
           id: currentUserId,
+          firstName: auth.currentUser.displayName || fallbackName,
+          lastName: "",
           familyName: auth.currentUser.displayName || fallbackName,
           city: "",
           email,
@@ -233,8 +244,10 @@ function App() {
     const formData = new FormData(form);
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const password = String(formData.get("password") ?? "");
-    const familyName = String(formData.get("familyName") ?? "").trim();
+    const firstName = String(formData.get("firstName") ?? "").trim();
+    const lastName = String(formData.get("lastName") ?? "").trim();
     const city = String(formData.get("city") ?? "").trim();
+    const familyName = [firstName, lastName].filter(Boolean).join(" ");
 
     if (firebaseEnabled) {
       try {
@@ -243,6 +256,8 @@ function App() {
           const credentials = await createUserWithEmailAndPassword(auth, email, password);
           const profile = {
             id: credentials.user.uid,
+            firstName,
+            lastName,
             familyName,
             city,
             email,
@@ -262,6 +277,8 @@ function App() {
     if (authMode === "register") {
       const profile = {
         id: createId("family"),
+        firstName,
+        lastName,
         familyName,
         city,
         email,
@@ -286,6 +303,8 @@ function App() {
         const credentials = await signInAnonymously(auth);
         const guestProfile = {
           id: credentials.user.uid,
+          firstName: "Gast",
+          lastName: "",
           familyName: "Gastfamilie",
           city: "",
           email: "",
@@ -527,7 +546,7 @@ function App() {
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-normal">FerienTausch</h1>
-              <p className="text-sm text-[#5f6e67]">{currentProfile.familyName} aus {currentProfile.city || "dem Freundeskreis"}</p>
+              <p className="text-sm text-[#5f6e67]">{getProfileName(currentProfile)} aus {currentProfile.city || "dem Freundeskreis"}</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -664,7 +683,8 @@ function AuthScreen({ authMode, error, onAuthModeChange, onSubmit, onAnonymous }
             </div>
             {authMode === "register" && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field name="familyName" label="Familienname" required />
+                <Field name="firstName" label="Vorname" required />
+                <Field name="lastName" label="Nachname" required />
                 <Field name="city" label="Wohnort" required />
               </div>
             )}
@@ -931,7 +951,8 @@ function ProfileView({ profile, onSave }) {
     <section className="max-w-2xl rounded-lg bg-white p-5 shadow-soft">
       <h2 className="text-xl font-bold">Profil verwalten</h2>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <FieldControlled label="Familienname" value={form.familyName} onChange={(familyName) => setForm({ ...form, familyName })} />
+        <FieldControlled label="Vorname" value={form.firstName ?? ""} onChange={(firstName) => setForm({ ...form, firstName, familyName: [firstName, form.lastName].filter(Boolean).join(" ") })} />
+        <FieldControlled label="Nachname" value={form.lastName ?? ""} onChange={(lastName) => setForm({ ...form, lastName, familyName: [form.firstName, lastName].filter(Boolean).join(" ") })} />
         <FieldControlled label="Wohnort" value={form.city} onChange={(city) => setForm({ ...form, city })} />
       </div>
       <FieldControlled label="E-Mail" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
@@ -968,7 +989,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onToggleAd
           {state.profiles.map((profile) => (
             <div key={profile.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <strong>{profile.familyName}</strong>
+                <strong>{getProfileName(profile)}</strong>
                 <p className="text-sm text-[#66756d]">{profile.email} · {profile.city}</p>
               </div>
               <div className="flex gap-2">
@@ -1219,7 +1240,7 @@ function RequestCard({ request, home, from, to, currentProfile, onStatus, onMess
           <Pill tone={request.status === "accepted" ? "green" : request.status === "declined" ? "red" : "amber"}>{statusLabels[request.status]}</Pill>
           <h3 className="mt-3 text-xl font-bold">{home?.title ?? "Unterkunft"}</h3>
           <p className="mt-1 text-sm text-[#66756d]">
-            {formatDateRange(request.start, request.end)} · {request.guests} Personen · {from?.familyName} an {to?.familyName ?? "extern"}
+            {formatDateRange(request.start, request.end)} · {request.guests} Personen · {getProfileName(from)} an {to ? getProfileName(to) : "extern"}
           </p>
         </div>
         {incoming && request.status === "pending" && (

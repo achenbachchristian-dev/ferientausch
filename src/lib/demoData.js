@@ -14,7 +14,9 @@ export const amenityOptions = [
 export const demoProfiles = [
   {
     id: "family-mayer",
-    familyName: "Familie Mayer",
+    firstName: "Anna",
+    lastName: "Mayer",
+    familyName: "Anna Mayer",
     city: "Muenchen",
     email: "mayer@example.com",
     description: "Vierkoepfige Familie, reist gern ans Wasser und tauscht am liebsten in den Schulferien.",
@@ -22,7 +24,9 @@ export const demoProfiles = [
   },
   {
     id: "family-lenz",
-    familyName: "Familie Lenz",
+    firstName: "Jonas",
+    lastName: "Lenz",
+    familyName: "Jonas Lenz",
     city: "Hamburg",
     email: "lenz@example.com",
     description: "Patchwork-Familie mit Teenagern, offen fuer Stadt, Berge und Nordsee.",
@@ -30,7 +34,9 @@ export const demoProfiles = [
   },
   {
     id: "family-sommer",
-    familyName: "Familie Sommer",
+    firstName: "Mira",
+    lastName: "Sommer",
+    familyName: "Mira Sommer",
     city: "Freiburg",
     email: "sommer@example.com",
     description: "Naturverliebt, kinderfreundlich, oft mit Grosseltern unterwegs.",
