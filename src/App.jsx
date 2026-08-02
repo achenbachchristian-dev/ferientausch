@@ -5,9 +5,13 @@ import {
   Bell,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronRight,
+  Download,
+  Filter,
   Home,
   ImagePlus,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -19,6 +23,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  UserCheck,
   UserPlus,
   Users,
   X,
@@ -43,6 +48,7 @@ import {
   getAvailabilityBookingState,
   getBookableAvailabilities,
   isRangeBookable,
+  rangesOverlap,
 } from "./lib/matching";
 import {
   createId,
@@ -92,6 +98,11 @@ const statusLabels = {
   declined: "Abgelehnt",
 };
 
+const INVITE_CODE = import.meta.env.VITE_INVITE_CODE || "ferien2026";
+const discoverFilterAmenities = ["WLAN", "Garten", "Pool", "Sauna", "Haustiere erlaubt", "Kinderfreundlich", "Strandnähe", "ÖPNV in der Nähe"];
+const profilePhotoFallback =
+  "https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?auto=format&fit=crop&w=500&q=80";
+
 const emptyState = {
   profiles: [],
   homes: [],
@@ -107,6 +118,18 @@ function getProfileName(profile) {
 
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
   return fullName || profile.familyName || profile.email || "Unbekannt";
+}
+
+function isProfileApproved(profile) {
+  return Boolean(profile?.isAdmin || profile?.approved !== false);
+}
+
+function getProfilePhoto(profile) {
+  return profile?.photoUrl || profilePhotoFallback;
+}
+
+function getPhone(profile) {
+  return profile?.phone || "Nicht hinterlegt";
 }
 
 function mergeBookings(bookings = []) {
@@ -126,6 +149,122 @@ function getHomeBookingStatus(bookableAvailabilities = [], bookings = []) {
   }
 
   return bookableAvailabilities.length ? "partial" : "booked";
+}
+
+function getHomeAvailabilityMode(homeId, bookableAvailabilities = [], bookings = []) {
+  const homeBookings = bookings.filter((booking) => booking.homeId === homeId);
+  const homeBookable = bookableAvailabilities.filter((availability) => availability.homeId === homeId);
+  const bookingStatus = getHomeBookingStatus(homeBookable, homeBookings);
+
+  if (bookingStatus === "booked") {
+    return "booked";
+  }
+
+  if (bookingStatus === "partial") {
+    return "partial";
+  }
+
+  return homeBookable.length ? "free" : "none";
+}
+
+function getMonthDays(year, monthIndex) {
+  const firstDate = new Date(year, monthIndex, 1);
+  const startOffset = (firstDate.getDay() + 6) % 7;
+  const start = new Date(year, monthIndex, 1 - startOffset);
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return {
+      iso: date.toISOString().slice(0, 10),
+      label: date.getDate(),
+      inMonth: date.getMonth() === monthIndex,
+    };
+  });
+}
+
+function getCalendarDayStatus(homeId, isoDate, availabilities = [], bookings = []) {
+  const dayRange = { start: isoDate, end: isoDate };
+  const available = availabilities.some((availability) => availability.homeId === homeId && rangesOverlap(availability, dayRange));
+  const booked = bookings.some((booking) => booking.homeId === homeId && rangesOverlap(booking, dayRange));
+
+  if (booked) {
+    return "booked";
+  }
+
+  return available ? "free" : "none";
+}
+
+function csvValue(value) {
+  return `"${String(value ?? "").replaceAll('"', '""')}"`;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(csvValue).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function toIcalDate(date) {
+  return date.replaceAll("-", "");
+}
+
+function addOneDayIso(date) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+function downloadIcal(home, availabilities = [], bookings = []) {
+  if (!home) {
+    return;
+  }
+
+  const events = [
+    ...availabilities
+      .filter((availability) => availability.homeId === home.id)
+      .map((availability) => ({
+        id: availability.id,
+        title: `Frei: ${home.title}`,
+        start: availability.start,
+        end: availability.end,
+      })),
+    ...bookings
+      .filter((booking) => booking.homeId === home.id)
+      .map((booking) => ({
+        id: booking.id,
+        title: `Gebucht: ${home.title}`,
+        start: booking.start,
+        end: booking.end,
+      })),
+  ];
+
+  const ical = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//FerienTausch//DE",
+    ...events.flatMap((event) => [
+      "BEGIN:VEVENT",
+      `UID:${event.id}@ferientausch`,
+      `SUMMARY:${event.title}`,
+      `DTSTART;VALUE=DATE:${toIcalDate(event.start)}`,
+      `DTEND;VALUE=DATE:${toIcalDate(addOneDayIso(event.end))}`,
+      "END:VEVENT",
+    ]),
+    "END:VCALENDAR",
+  ].join("\r\n");
+  const blob = new Blob([ical], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${home.title || "ferientausch"}.ics`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function getHomePhotos(home) {
@@ -175,6 +314,9 @@ function App() {
   const [minGuests, setMinGuests] = useState("");
   const [travelStart, setTravelStart] = useState("");
   const [travelEnd, setTravelEnd] = useState("");
+  const [selectedAmenities, setSelectedAmenities] = useState([]);
+  const [availabilityMode, setAvailabilityMode] = useState("all");
+  const [adminSection, setAdminSection] = useState("overview");
   const knownProfileIdsRef = useRef(new Set());
 
   useEffect(() => {
@@ -338,18 +480,35 @@ function App() {
 
   const filteredHomes = useMemo(() => {
     return state.homes.filter((home) => {
-      const textMatch = `${home.title} ${home.city} ${home.address} ${home.description}`
+      const textMatch = `${home.title} ${home.city} ${home.address} ${home.description} ${(home.amenities ?? []).join(" ")}`
         .toLowerCase()
         .includes(query.toLowerCase());
       const guestMatch = !minGuests || Number(home.maxGuests) >= Number(minGuests);
+      const amenitiesMatch = selectedAmenities.every((amenity) => (home.amenities ?? []).includes(amenity));
       const dateMatch =
         !travelStart ||
         !travelEnd ||
         isRangeBookable(home.id, travelStart, travelEnd, state.availabilities, acceptedBookings);
+      const mode = getHomeAvailabilityMode(home.id, bookableAvailabilities, acceptedBookings);
+      const availabilityMatch =
+        availabilityMode === "all" ||
+        (availabilityMode === "available" && (mode === "free" || mode === "partial")) ||
+        availabilityMode === mode;
 
-      return textMatch && guestMatch && dateMatch;
+      return textMatch && guestMatch && amenitiesMatch && dateMatch && availabilityMatch;
     });
-  }, [acceptedBookings, minGuests, query, state.availabilities, state.homes, travelEnd, travelStart]);
+  }, [
+    acceptedBookings,
+    availabilityMode,
+    bookableAvailabilities,
+    minGuests,
+    query,
+    selectedAmenities,
+    state.availabilities,
+    state.homes,
+    travelEnd,
+    travelStart,
+  ]);
 
   function updateState(updater) {
     setState((current) => {
@@ -369,7 +528,13 @@ function App() {
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
     const city = String(formData.get("city") ?? "").trim();
+    const inviteCode = String(formData.get("inviteCode") ?? "").trim();
     const familyName = [firstName, lastName].filter(Boolean).join(" ");
+
+    if (authMode === "register" && inviteCode !== INVITE_CODE) {
+      setFirebaseError("Der Einladungscode ist nicht korrekt.");
+      return;
+    }
 
     if (firebaseEnabled) {
       try {
@@ -385,6 +550,7 @@ function App() {
             email,
             description: "Neu im FerienTausch.",
             isAdmin: false,
+            approved: false,
           };
           await saveRecord("profiles", profile);
         } else {
@@ -406,6 +572,7 @@ function App() {
         email,
         description: "Neu im FerienTausch.",
         isAdmin: state.profiles.length === 0,
+        approved: state.profiles.length === 0,
       };
       updateState((current) => ({ ...current, profiles: [...current.profiles, profile] }));
       setCurrentUserId(profile.id);
@@ -432,6 +599,7 @@ function App() {
           email: "",
           description: "Anonymer Gastzugang.",
           isAdmin: false,
+          approved: true,
         };
         await saveRecord("profiles", guestProfile);
       } catch (error) {
@@ -566,6 +734,27 @@ function App() {
     }
   }
 
+  async function declineConflictingPendingRequests(acceptedRequest) {
+    const conflicts = state.requests.filter(
+      (request) =>
+        request.id !== acceptedRequest.id &&
+        request.homeId === acceptedRequest.homeId &&
+        request.status === "pending" &&
+        rangesOverlap(request, acceptedRequest),
+    );
+
+    await Promise.all(
+      conflicts.map((request) =>
+        patchRecord("exchangeRequests", request.id, {
+          status: "declined",
+          conflictReason: `Automatisch abgelehnt, weil ${formatDateRange(acceptedRequest.start, acceptedRequest.end)} gebucht wurde.`,
+        }),
+      ),
+    );
+
+    return conflicts.map((request) => request.id);
+  }
+
   async function updateRequestStatus(id, status) {
     try {
       setFirebaseError("");
@@ -591,6 +780,7 @@ function App() {
 
       const nextRequest = { ...existing, status };
       await patchRecord("exchangeRequests", id, { status });
+      const declinedConflictIds = status === "accepted" ? await declineConflictingPendingRequests(nextRequest) : [];
       if (status === "accepted") {
         await saveRecord("bookings", bookingFromRequest(nextRequest));
       } else {
@@ -598,7 +788,15 @@ function App() {
       }
       updateState((current) => ({
         ...current,
-        requests: current.requests.map((request) => (request.id === id ? { ...request, status } : request)),
+        requests: current.requests.map((request) => {
+          if (request.id === id) {
+            return { ...request, status };
+          }
+          if (declinedConflictIds.includes(request.id)) {
+            return { ...request, status: "declined", conflictReason: "Automatisch wegen überschneidender Buchung abgelehnt." };
+          }
+          return request;
+        }),
         bookings:
           status === "accepted"
             ? mergeBookings([...(current.bookings ?? []).filter((booking) => booking.requestId !== id), bookingFromRequest(nextRequest)])
@@ -639,6 +837,8 @@ function App() {
       }
 
       await patchRecord("exchangeRequests", id, normalized);
+      const declinedConflictIds =
+        nextRequest.status === "accepted" ? await declineConflictingPendingRequests(nextRequest) : [];
       if (nextRequest.status === "accepted") {
         await saveRecord("bookings", bookingFromRequest(nextRequest));
       } else {
@@ -646,9 +846,15 @@ function App() {
       }
       updateState((current) => ({
         ...current,
-        requests: current.requests.map((request) =>
-          request.id === id ? { ...request, ...normalized } : request,
-        ),
+        requests: current.requests.map((request) => {
+          if (request.id === id) {
+            return { ...request, ...normalized };
+          }
+          if (declinedConflictIds.includes(request.id)) {
+            return { ...request, status: "declined", conflictReason: "Automatisch wegen überschneidender Buchung abgelehnt." };
+          }
+          return request;
+        }),
         bookings:
           nextRequest.status === "accepted"
             ? mergeBookings([...(current.bookings ?? []).filter((booking) => booking.requestId !== id), bookingFromRequest(nextRequest)])
@@ -721,6 +927,12 @@ function App() {
     await saveProfile(next);
   }
 
+  async function toggleProfileApproval(profileId) {
+    const profile = state.profiles.find((entry) => entry.id === profileId);
+    const next = { ...profile, approved: !isProfileApproved(profile) };
+    await saveProfile(next);
+  }
+
   async function deleteHome(id) {
     try {
       setFirebaseError("");
@@ -790,6 +1002,10 @@ function App() {
     );
   }
 
+  if (!isProfileApproved(currentProfile)) {
+    return <ApprovalPendingScreen profile={currentProfile} onLogout={handleLogout} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#f5f3ee] text-[#24313a]">
       <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-white/95 shadow-[0_10px_30px_rgba(36,49,58,0.06)] backdrop-blur">
@@ -800,9 +1016,12 @@ function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="rounded-lg bg-[#f8faf5] px-3 py-2 text-right">
-              <p className="text-sm font-bold text-[#24313a]">{getProfileName(currentProfile)}</p>
-              <p className="text-xs text-[#66756d]">{currentProfile.city || "Freundeskreis"}</p>
+            <div className="flex items-center gap-2 rounded-lg bg-[#f8faf5] px-3 py-2">
+              <img className="h-9 w-9 rounded-lg object-cover" src={getProfilePhoto(currentProfile)} alt="" />
+              <div className="text-right">
+                <p className="text-sm font-bold text-[#24313a]">{getProfileName(currentProfile)}</p>
+                <p className="text-xs text-[#66756d]">{currentProfile.city || "Freundeskreis"}</p>
+              </div>
             </div>
             {currentProfile.isAdmin && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
@@ -863,6 +1082,10 @@ function App() {
             setQuery={setQuery}
             minGuests={minGuests}
             setMinGuests={setMinGuests}
+            selectedAmenities={selectedAmenities}
+            setSelectedAmenities={setSelectedAmenities}
+            availabilityMode={availabilityMode}
+            setAvailabilityMode={setAvailabilityMode}
             travelStart={travelStart}
             setTravelStart={setTravelStart}
             travelEnd={travelEnd}
@@ -908,7 +1131,14 @@ function App() {
             onUploadPhoto={handleHomePhotoUpload}
             onSaveProfile={saveProfile}
             onToggleAdmin={toggleAdmin}
+            onToggleApproval={toggleProfileApproval}
             onDeleteProfile={deleteProfile}
+            onStatus={updateRequestStatus}
+            onMessage={addRequestMessage}
+            onSaveRequest={saveRequestDetails}
+            onDeleteRequest={deleteRequest}
+            adminSection={adminSection}
+            setAdminSection={setAdminSection}
           />
         )}
       </main>
@@ -990,6 +1220,7 @@ function AuthScreen({ authMode, error, onAuthModeChange, onSubmit, onAnonymous }
                 <Field name="firstName" label="Vorname" required />
                 <Field name="lastName" label="Nachname" required />
                 <Field name="city" label="Wohnort" required />
+                <Field name="inviteCode" label="Einladungscode" required />
               </div>
             )}
             <Field name="email" label="E-Mail" type="email" defaultValue="mayer@example.com" required />
@@ -1027,6 +1258,25 @@ function LoadingScreen({ title, text, error, onLogout }) {
             <LogOut size={17} /> Abmelden
           </button>
         )}
+      </section>
+    </main>
+  );
+}
+
+function ApprovalPendingScreen({ profile, onLogout }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#f5f3ee] px-4">
+      <section className="w-full max-w-md rounded-lg bg-white p-5 text-center shadow-soft">
+        <div className="mx-auto grid h-12 w-12 place-items-center rounded-lg bg-[#fff5df] text-[#75511a]">
+          <UserCheck size={22} />
+        </div>
+        <h1 className="mt-4 text-xl font-bold">Freigabe ausstehend</h1>
+        <p className="mt-2 text-sm leading-6 text-[#66756d]">
+          Dein Konto für {getProfileName(profile)} wurde angelegt. Ein Admin muss es noch freigeben.
+        </p>
+        <button className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={onLogout}>
+          <LogOut size={17} /> Abmelden
+        </button>
       </section>
     </main>
   );
@@ -1271,6 +1521,10 @@ function DiscoverView({
   setQuery,
   minGuests,
   setMinGuests,
+  selectedAmenities,
+  setSelectedAmenities,
+  availabilityMode,
+  setAvailabilityMode,
   travelStart,
   setTravelStart,
   travelEnd,
@@ -1278,6 +1532,12 @@ function DiscoverView({
   onRequest,
   onDetails,
 }) {
+  function toggleAmenity(amenity) {
+    setSelectedAmenities((current) =>
+      current.includes(amenity) ? current.filter((entry) => entry !== amenity) : [...current, amenity],
+    );
+  }
+
   return (
     <div className="space-y-5">
       <Toolbar>
@@ -1286,6 +1546,47 @@ function DiscoverView({
         <FieldCompact label="Von" type="date" value={travelStart} onChange={setTravelStart} />
         <FieldCompact label="Bis" type="date" value={travelEnd} onChange={setTravelEnd} />
       </Toolbar>
+      <div className="rounded-lg bg-white p-3 shadow-soft">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-2 inline-flex items-center gap-2 text-xs font-bold uppercase text-[#66756d]">
+              <Filter size={15} /> Ausstattung
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {discoverFilterAmenities.map((amenity) => {
+                const selected = selectedAmenities.includes(amenity);
+                return (
+                  <button
+                    key={amenity}
+                    type="button"
+                    className={`h-9 rounded-lg px-3 text-sm font-semibold ${
+                      selected ? "bg-[#2d6a62] text-white" : "bg-[#edf1e8] text-[#4f5d55]"
+                    }`}
+                    onClick={() => toggleAmenity(amenity)}
+                  >
+                    {amenity}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <label className="min-w-56 text-xs font-bold uppercase text-[#66756d]">
+            Verfügbarkeit
+            <select
+              className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] bg-white px-3 text-sm font-medium normal-case text-[#24313a]"
+              value={availabilityMode}
+              onChange={(event) => setAvailabilityMode(event.target.value)}
+            >
+              <option value="all">Alle anzeigen</option>
+              <option value="available">Anfragbar</option>
+              <option value="free">Nur komplett frei</option>
+              <option value="partial">Teilweise gebucht</option>
+              <option value="booked">Vollständig gebucht</option>
+            </select>
+          </label>
+        </div>
+        {uploadNote && <p className="mt-2 text-xs font-semibold text-[#66756d]">{uploadNote}</p>}
+      </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {homes.map((home) => {
           const homeBookableAvailabilities = bookableAvailabilities.filter(
@@ -1358,7 +1659,21 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
 
 function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
   const [form, setForm] = useState({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
   const sortedBookings = [...bookings].sort((first, second) => first.start.localeCompare(second.start));
+  const [calendarYear, calendarMonthNumber] = calendarMonth.split("-").map(Number);
+  const calendarMonthIndex = calendarMonthNumber - 1;
+  const calendarDays = getMonthDays(calendarYear, calendarMonthIndex);
+  const selectedCalendarHomeId = form.homeId || homes[0]?.id || "";
+  const selectedCalendarHome = homes.find((home) => home.id === selectedCalendarHomeId);
+
+  function shiftMonth(offset) {
+    const next = new Date(calendarYear, calendarMonthIndex + offset, 1);
+    setCalendarMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+  }
 
   return (
     <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
@@ -1387,6 +1702,57 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
             }}
           >
             <CalendarDays size={18} /> Zeitraum speichern
+          </button>
+        </div>
+        <div className="mt-5 rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <button className="grid h-9 w-9 place-items-center rounded-lg border border-[#cfd7cd] bg-white" onClick={() => shiftMonth(-1)} type="button">
+              <ArrowLeft size={16} />
+            </button>
+            <div className="text-center">
+              <p className="text-sm font-bold">
+                {new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }).format(new Date(calendarYear, calendarMonthIndex, 1))}
+              </p>
+              <p className="text-xs text-[#66756d]">{selectedCalendarHome?.title ?? "Unterkunft"}</p>
+            </div>
+            <button className="grid h-9 w-9 place-items-center rounded-lg border border-[#cfd7cd] bg-white" onClick={() => shiftMonth(1)} type="button">
+              <ArrowRight size={16} />
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-7 gap-1 text-center text-xs font-bold uppercase text-[#66756d]">
+            {["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((day) => <span key={day}>{day}</span>)}
+          </div>
+          <div className="mt-2 grid grid-cols-7 gap-1">
+            {calendarDays.map((day) => {
+              const status = getCalendarDayStatus(selectedCalendarHomeId, day.iso, availabilities, bookings);
+              const className =
+                status === "booked"
+                  ? "bg-[#f4d3cd] text-[#8a332b]"
+                  : status === "free"
+                    ? "bg-[#dcedd8] text-[#255c37]"
+                    : "bg-white text-[#9aa39d]";
+              return (
+                <div
+                  key={day.iso}
+                  className={`grid aspect-square place-items-center rounded-lg text-xs font-bold ${className} ${day.inMonth ? "" : "opacity-45"}`}
+                  title={status === "booked" ? "Gebucht" : status === "free" ? "Frei" : "Nicht freigegeben"}
+                >
+                  {day.label}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-[#66756d]">
+            <span className="rounded-lg bg-[#dcedd8] px-2 py-1 text-[#255c37]">Frei</span>
+            <span className="rounded-lg bg-[#f4d3cd] px-2 py-1 text-[#8a332b]">Gebucht</span>
+            <span className="rounded-lg bg-white px-2 py-1">Nicht freigegeben</span>
+          </div>
+          <button
+            className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 text-sm font-semibold"
+            type="button"
+            onClick={() => downloadIcal(selectedCalendarHome ?? homes[0], availabilities, bookings)}
+          >
+            <Download size={17} /> Kalender exportieren
           </button>
         </div>
       </section>
@@ -1504,13 +1870,30 @@ function ProfileView({ profile, onSave }) {
 
   return (
     <section className="max-w-2xl rounded-lg bg-white p-5 shadow-soft">
-      <h2 className="text-xl font-bold">Profil verwalten</h2>
+      <div className="flex items-center gap-3">
+        <img className="h-16 w-16 rounded-lg object-cover" src={getProfilePhoto(form)} alt="" />
+        <div>
+          <h2 className="text-xl font-bold">Profil verwalten</h2>
+          <p className="mt-1 text-sm text-[#66756d]">{getProfileName(form)}</p>
+        </div>
+      </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <FieldControlled label="Vorname" value={form.firstName ?? ""} onChange={(firstName) => setForm({ ...form, firstName, familyName: [firstName, form.lastName].filter(Boolean).join(" ") })} />
         <FieldControlled label="Nachname" value={form.lastName ?? ""} onChange={(lastName) => setForm({ ...form, lastName, familyName: [form.firstName, lastName].filter(Boolean).join(" ") })} />
         <FieldControlled label="Wohnort" value={form.city} onChange={(city) => setForm({ ...form, city })} />
+        <FieldControlled label="Telefonnummer" value={form.phone ?? ""} onChange={(phone) => setForm({ ...form, phone })} />
       </div>
       <FieldControlled label="E-Mail" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
+      <FieldControlled label="Profilbild-URL" value={form.photoUrl ?? ""} onChange={(photoUrl) => setForm({ ...form, photoUrl })} placeholder="https://..." />
+      <label className="mt-3 inline-flex cursor-pointer items-center gap-3 rounded-lg border border-[#cfd7cd] bg-[#f8faf5] px-3 py-2 text-sm font-semibold">
+        <input
+          className="h-5 w-5 accent-[#2d6a62]"
+          type="checkbox"
+          checked={form.visibility !== "private"}
+          onChange={(event) => setForm({ ...form, visibility: event.target.checked ? "friends" : "private" })}
+        />
+        Für den Freundeskreis sichtbar
+      </label>
       <label className="mt-3 block text-sm font-semibold">
         Beschreibung
         <textarea className="mt-1 min-h-28 w-full rounded-lg border border-[#cfd7cd] p-3" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
@@ -1522,7 +1905,23 @@ function ProfileView({ profile, onSave }) {
   );
 }
 
-function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPhoto, onSaveProfile, onToggleAdmin, onDeleteProfile }) {
+function AdminView({
+  state,
+  currentProfile,
+  onSaveHome,
+  onDeleteHome,
+  onUploadPhoto,
+  onSaveProfile,
+  onToggleAdmin,
+  onToggleApproval,
+  onDeleteProfile,
+  onStatus,
+  onMessage,
+  onSaveRequest,
+  onDeleteRequest,
+  adminSection,
+  setAdminSection,
+}) {
   const [externalHome, setExternalHome] = useState({
     ...blankHouse,
     id: createId("home"),
@@ -1530,6 +1929,16 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
     managedBy: currentProfile.id,
     isExternal: true,
   });
+  const adminTabs = [
+    { id: "overview", label: "Übersicht" },
+    { id: "members", label: "Mitglieder" },
+    { id: "homes", label: "Häuser" },
+    { id: "requests", label: "Anfragen" },
+    { id: "bookings", label: "Buchungen" },
+    { id: "export", label: "Export" },
+  ];
+  const bookings = mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]);
+  const pendingProfiles = state.profiles.filter((profile) => !isProfileApproved(profile));
 
   async function updateRegistrationNotificationPreference(enabled) {
     if (enabled) {
@@ -1546,6 +1955,21 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
         <Metric label="Mitglieder" value={state.profiles.length} />
         <Metric label="Tauschanfragen" value={state.requests.length} />
       </div>
+      <div className="flex gap-2 overflow-x-auto rounded-lg bg-white p-2 shadow-soft">
+        {adminTabs.map((tab) => (
+          <button
+            key={tab.id}
+            className={`h-10 shrink-0 rounded-lg px-3 text-sm font-semibold ${
+              adminSection === tab.id ? "bg-[#24313a] text-white" : "bg-[#f8faf5] text-[#4f5d55]"
+            }`}
+            onClick={() => setAdminSection(tab.id)}
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {adminSection === "overview" && (
       <section className="rounded-lg bg-white p-4 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
@@ -1570,6 +1994,8 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
           </label>
         </div>
       </section>
+      )}
+      {adminSection === "members" && (
       <section className="rounded-lg bg-white p-4 shadow-soft">
         <h2 className="text-xl font-bold">Mitglieder & Rechte</h2>
         <div className="mt-3 divide-y divide-[#edf0ea]">
@@ -1580,6 +2006,9 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
                 <p className="text-sm text-[#66756d]">{profile.email} · {profile.city}</p>
               </div>
               <div className="flex gap-2">
+                <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onToggleApproval(profile.id)}>
+                  <UserCheck size={17} /> {isProfileApproved(profile) ? "Sperren" : "Freigeben"}
+                </button>
                 <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onToggleAdmin(profile.id)}>
                   <ShieldCheck size={17} /> {profile.isAdmin ? "Admin entfernen" : "Admin vergeben"}
                 </button>
@@ -1593,6 +2022,8 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
           ))}
         </div>
       </section>
+      )}
+      {adminSection === "homes" && (
       <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
         <div className="rounded-lg bg-white p-4 shadow-soft">
           <h2 className="text-xl font-bold">Haus für Dritte eintragen</h2>
@@ -1624,6 +2055,134 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
           </div>
         </div>
       </section>
+      )}
+      {adminSection === "overview" && pendingProfiles.length > 0 && (
+        <section className="rounded-lg bg-white p-4 shadow-soft">
+          <h2 className="text-xl font-bold">Neue Profile freigeben</h2>
+          <div className="mt-3 grid gap-3">
+            {pendingProfiles.map((profile) => (
+              <div key={profile.id} className="flex flex-col gap-3 rounded-lg border border-[#edf0ea] p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                  <img className="h-12 w-12 rounded-lg object-cover" src={getProfilePhoto(profile)} alt="" />
+                  <div>
+                    <strong>{getProfileName(profile)}</strong>
+                    <p className="text-sm text-[#66756d]">{profile.email} · {profile.city}</p>
+                  </div>
+                </div>
+                <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-3 text-sm font-semibold text-white" onClick={() => onToggleApproval(profile.id)}>
+                  <CheckCircle2 size={17} /> Freigeben
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {adminSection === "overview" && (
+        <section className="rounded-lg bg-white p-4 shadow-soft">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#edf1e8] text-[#255c37]">
+              <KeyRound size={18} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Einladungscode</h2>
+              <p className="mt-1 text-sm text-[#66756d]">
+                Aktueller Code: <strong>{INVITE_CODE}</strong>. In Vercel kann er über <code>VITE_INVITE_CODE</code> geändert werden.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+      {adminSection === "requests" && (
+        <section className="grid gap-4">
+          {state.requests.map((request) => (
+            <RequestCard
+              key={request.id}
+              request={request}
+              home={state.homes.find((home) => home.id === request.homeId)}
+              from={state.profiles.find((profile) => profile.id === request.fromUserId)}
+              to={state.profiles.find((profile) => profile.id === request.toUserId)}
+              homes={state.homes}
+              profiles={state.profiles}
+              currentProfile={currentProfile}
+              onStatus={onStatus}
+              onMessage={onMessage}
+              onSave={onSaveRequest}
+              onDelete={onDeleteRequest}
+            />
+          ))}
+          {!state.requests.length && <EmptyState title="Keine Anfragen" text="Es liegen noch keine Tauschanfragen vor." />}
+        </section>
+      )}
+      {adminSection === "bookings" && (
+        <section className="rounded-lg bg-white p-4 shadow-soft">
+          <h2 className="text-xl font-bold">Alle Buchungen</h2>
+          <div className="mt-3 grid gap-3">
+            {bookings.map((booking) => (
+              <DateRow
+                key={booking.id}
+                title={state.homes.find((home) => home.id === booking.homeId)?.title ?? "Unterkunft"}
+                subtitle={`${booking.guests || 0} Personen`}
+                start={booking.start}
+                end={booking.end}
+                status="booked"
+              />
+            ))}
+            {!bookings.length && <EmptyState title="Keine Buchungen" text="Angenommene Anfragen erscheinen hier automatisch." />}
+          </div>
+        </section>
+      )}
+      {adminSection === "export" && (
+        <section className="rounded-lg bg-white p-4 shadow-soft">
+          <h2 className="text-xl font-bold">Daten exportieren</h2>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold"
+              onClick={() =>
+                downloadCsv("mitglieder.csv", [
+                  ["Name", "E-Mail", "Wohnort", "Telefon", "Admin", "Freigegeben"],
+                  ...state.profiles.map((profile) => [
+                    getProfileName(profile),
+                    profile.email,
+                    profile.city,
+                    profile.phone,
+                    profile.isAdmin ? "Ja" : "Nein",
+                    isProfileApproved(profile) ? "Ja" : "Nein",
+                  ]),
+                ])
+              }
+            >
+              <Download size={17} /> Mitglieder CSV
+            </button>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold"
+              onClick={() =>
+                downloadCsv("haeuser.csv", [
+                  ["Titel", "Stadt", "Adresse", "Gäste", "Ausstattung"],
+                  ...state.homes.map((home) => [home.title, home.city, home.address, home.maxGuests, (home.amenities ?? []).join("; ")]),
+                ])
+              }
+            >
+              <Download size={17} /> Häuser CSV
+            </button>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold"
+              onClick={() =>
+                downloadCsv("buchungen.csv", [
+                  ["Haus", "Start", "Ende", "Personen"],
+                  ...bookings.map((booking) => [
+                    state.homes.find((home) => home.id === booking.homeId)?.title ?? "Unterkunft",
+                    booking.start,
+                    booking.end,
+                    booking.guests,
+                  ]),
+                ])
+              }
+            >
+              <Download size={17} /> Buchungen CSV
+            </button>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -1798,6 +2357,15 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
               <p className="mt-4 inline-flex items-center gap-2 text-sm text-[#66756d]">
                 <MapPin size={16} /> {home.address || home.city}
               </p>
+              {owner && owner.visibility !== "private" && (
+                <div className="mt-4 flex items-center gap-3 rounded-lg bg-[#f8faf5] p-3">
+                  <img className="h-12 w-12 rounded-lg object-cover" src={getProfilePhoto(owner)} alt="" />
+                  <div>
+                    <p className="text-sm font-bold">{getProfileName(owner)}</p>
+                    <p className="text-xs text-[#66756d]">{owner.email || "E-Mail nicht hinterlegt"} · {getPhone(owner)}</p>
+                  </div>
+                </div>
+              )}
               <button
                 className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 font-semibold text-white disabled:bg-[#b7bdb8]"
                 disabled={requestDisabled}
@@ -1894,6 +2462,7 @@ function MapPreview({ home }) {
 function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact = false }) {
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadNote, setUploadNote] = useState("");
 
   function updateField(field, nextValue) {
     onChange({ ...value, [field]: nextValue });
@@ -1920,7 +2489,14 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
     }
 
     setUploadingPhoto(true);
-    const photoUrl = onUploadPhoto ? await onUploadPhoto(value.id, file) : await fileToDataUrl(file);
+    setUploadNote("Bild wird vorbereitet...");
+    const preparedFile = await compressImageFile(file);
+    setUploadNote(
+      preparedFile.size < file.size
+        ? `Komprimiert von ${formatFileSize(file.size)} auf ${formatFileSize(preparedFile.size)}.`
+        : `Dateigröße: ${formatFileSize(file.size)}.`,
+    );
+    const photoUrl = onUploadPhoto ? await onUploadPhoto(value.id, preparedFile) : await fileToDataUrl(preparedFile);
     updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0, [...getPhotoCaptions(value), ""]);
     setUploadingPhoto(false);
     event.target.value = "";
@@ -2417,6 +2993,51 @@ function fileToDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) {
+    return "0 KB";
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function compressImageFile(file) {
+  if (!file.type.startsWith("image/")) {
+    return file;
+  }
+
+  const imageUrl = URL.createObjectURL(file);
+  const image = new Image();
+  image.src = imageUrl;
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = reject;
+  });
+
+  const maxSize = 1800;
+  const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+  const width = Math.round(image.width * scale);
+  const height = Math.round(image.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, width, height);
+  URL.revokeObjectURL(imageUrl);
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.84));
+  if (!blob || blob.size >= file.size) {
+    return file;
+  }
+
+  const safeName = file.name.replace(/\.[^.]+$/, ".jpg");
+  return new File([blob], safeName, { type: "image/jpeg" });
 }
 
 async function requestBrowserNotificationPermission() {

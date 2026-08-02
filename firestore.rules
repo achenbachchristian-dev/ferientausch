@@ -16,11 +16,19 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn()
         && profileId == request.auth.uid
-        && request.resource.data.isAdmin == false;
+        && request.resource.data.isAdmin == false
+        && (
+          request.resource.data.approved == false
+          || (
+            request.resource.data.email == ""
+            && request.resource.data.approved == true
+          )
+        );
       allow update: if isAdmin()
         || (
           profileId == request.auth.uid
           && request.resource.data.isAdmin == resource.data.isAdmin
+          && request.resource.data.approved == resource.data.approved
         );
       allow delete: if isAdmin() && profileId != request.auth.uid;
     }
