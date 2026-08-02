@@ -5,7 +5,6 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
-  DatabaseZap,
   Home,
   ImagePlus,
   LogOut,
@@ -24,10 +23,7 @@ import {
 import {
   auth,
   createUserWithEmailAndPassword,
-  firebaseConfigComplete,
   firebaseEnabled,
-  firebaseProjectId,
-  firestoreDatabaseId,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,
@@ -95,8 +91,6 @@ function App() {
   );
   const [authChecked, setAuthChecked] = useState(!firebaseEnabled);
   const [firebaseError, setFirebaseError] = useState("");
-  const [firebaseNotice, setFirebaseNotice] = useState("");
-  const [firebaseTestStatus, setFirebaseTestStatus] = useState("");
   const [activeTab, setActiveTab] = useState("discover");
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
@@ -341,7 +335,6 @@ function App() {
             : [...current.homes, normalized],
         };
       });
-      setFirebaseNotice("Unterkunft wurde gespeichert.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -366,7 +359,6 @@ function App() {
             : [...current.availabilities, normalized],
         };
       });
-      setFirebaseNotice("Zeitraum wurde gespeichert.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -380,7 +372,6 @@ function App() {
         ...current,
         availabilities: current.availabilities.filter((availability) => availability.id !== id),
       }));
-      setFirebaseNotice("Zeitraum wurde geloescht.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -412,7 +403,6 @@ function App() {
       updateState((current) => ({ ...current, requests: [...current.requests, request] }));
       setRequestDraft(null);
       setActiveTab("requests");
-      setFirebaseNotice("Tauschanfrage wurde gespeichert.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -426,7 +416,6 @@ function App() {
         ...current,
         requests: current.requests.map((request) => (request.id === id ? { ...request, status } : request)),
       }));
-      setFirebaseNotice("Anfragestatus wurde gespeichert.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -449,7 +438,6 @@ function App() {
         ...current,
         requests: current.requests.map((entry) => (entry.id === id ? { ...entry, messages } : entry)),
       }));
-      setFirebaseNotice("Nachricht wurde gespeichert.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -463,40 +451,8 @@ function App() {
         ...current,
         profiles: current.profiles.map((entry) => (entry.id === profile.id ? profile : entry)),
       }));
-      setFirebaseNotice("Profil wurde gespeichert.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
-    }
-  }
-
-  async function runFirebaseWriteTest() {
-    if (!firebaseEnabled || !currentProfile) {
-      setFirebaseTestStatus("Test nicht moeglich: kein Firebase-Profil geladen.");
-      return;
-    }
-
-    try {
-      setFirebaseError("");
-      setFirebaseTestStatus("Test laeuft...");
-      const testedAt = new Date().toISOString();
-      await withTimeout(
-        saveRecord("profiles", {
-          ...currentProfile,
-          diagnostics: {
-            lastWriteTestAt: testedAt,
-            projectId: firebaseProjectId,
-            uid: currentProfile.id,
-          },
-        }),
-        8000,
-      );
-      const successMessage = `Gespeichert: profiles/${currentProfile.id}`;
-      setFirebaseNotice(`Firebase-Test gespeichert: profiles/${currentProfile.id}`);
-      setFirebaseTestStatus(successMessage);
-    } catch (error) {
-      const message = formatFirebaseError(error);
-      setFirebaseError(message);
-      setFirebaseTestStatus(message);
     }
   }
 
@@ -515,7 +471,6 @@ function App() {
         homes: current.homes.filter((home) => home.id !== id),
         availabilities: current.availabilities.filter((availability) => availability.homeId !== id),
       }));
-      setFirebaseNotice("Unterkunft wurde geloescht.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -530,7 +485,6 @@ function App() {
         profiles: current.profiles.filter((profile) => profile.id !== id),
         homes: current.homes.filter((home) => home.ownerId !== id),
       }));
-      setFirebaseNotice("Profil wurde geloescht.");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -577,15 +531,7 @@ function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Pill tone={firebaseEnabled && firebaseConfigComplete ? "green" : "amber"}>
-              {firebaseEnabled ? `Firebase: ${firebaseProjectId}/${firestoreDatabaseId}` : "Demo-Modus"}
-            </Pill>
-            {firebaseEnabled && (
-              <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={runFirebaseWriteTest}>
-                <DatabaseZap size={18} /> Test
-              </button>
-            )}
-            {firebaseTestStatus && <Pill tone={firebaseTestStatus.startsWith("Gespeichert") ? "green" : "amber"}>{firebaseTestStatus}</Pill>}
+            <Pill tone={firebaseEnabled ? "green" : "amber"}>{firebaseEnabled ? "Firebase aktiv" : "Demo-Modus"}</Pill>
             {currentProfile.isAdmin && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
                 <ShieldCheck size={18} /> Admin
@@ -617,12 +563,6 @@ function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-        {firebaseEnabled && !firebaseConfigComplete && (
-          <FirebaseErrorBanner
-            message="Firebase-Konfiguration ist unvollstaendig. Bitte alle VITE_FIREBASE_ Variablen in Vercel pruefen und neu deployen."
-          />
-        )}
-        {firebaseNotice && <FirebaseSuccessBanner message={firebaseNotice} onDismiss={() => setFirebaseNotice("")} />}
         {firebaseError && <FirebaseErrorBanner message={firebaseError} onDismiss={() => setFirebaseError("")} />}
         {activeTab === "discover" && (
           <DiscoverView
@@ -777,17 +717,6 @@ function FirebaseErrorBanner({ message, onDismiss }) {
           Schliessen
         </button>
       )}
-    </div>
-  );
-}
-
-function FirebaseSuccessBanner({ message, onDismiss }) {
-  return (
-    <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[#b8d8b1] bg-[#e8f6e5] p-3 text-sm text-[#255c37] sm:flex-row sm:items-center sm:justify-between">
-      <strong>{message}</strong>
-      <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 font-semibold" onClick={onDismiss}>
-        Schliessen
-      </button>
     </div>
   );
 }
@@ -1428,15 +1357,6 @@ function fileToDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-}
-
-function withTimeout(promise, timeoutMs) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      window.setTimeout(() => reject(new Error("Firebase antwortet nicht innerhalb von 8 Sekunden.")), timeoutMs);
-    }),
-  ]);
 }
 
 function formatFirebaseError(error) {
