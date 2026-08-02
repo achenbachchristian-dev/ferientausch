@@ -79,6 +79,7 @@ const tabs = [
 const blankHouse = {
   title: "",
   city: "",
+  region: "",
   address: "",
   maxGuests: 4,
   bedrooms: 2,
@@ -223,6 +224,7 @@ function getHomeQualityIssues(home) {
   const issues = [];
   if (!home.title) issues.push("Titel fehlt");
   if (!home.city) issues.push("Ort fehlt");
+  if (!home.region) issues.push("Region fehlt");
   if (!home.address) issues.push("Adresse fehlt");
   if (!home.description || home.description.length < 40) issues.push("Beschreibung zu kurz");
   if (!getHomePhotos(home).length) issues.push("Keine Bilder");
@@ -590,14 +592,14 @@ function App() {
 
   const filteredHomes = useMemo(() => {
     return state.homes.filter((home) => {
-      const textMatch = `${home.title} ${home.city} ${home.address} ${home.description} ${(home.amenities ?? []).join(" ")}`
+      const textMatch = `${home.title} ${home.city} ${home.region ?? ""} ${home.address} ${home.description} ${(home.amenities ?? []).join(" ")}`
         .toLowerCase()
         .includes(query.toLowerCase());
       const guestMatch = !minGuests || Number(home.maxGuests) >= Number(minGuests);
       const bedroomMatch = !minBedrooms || Number(home.bedrooms) >= Number(minBedrooms);
       const regionMatch =
         !regionFilter ||
-        `${home.city} ${home.address}`.toLowerCase().includes(regionFilter.toLowerCase());
+        `${home.region ?? ""} ${home.city} ${home.address}`.toLowerCase().includes(regionFilter.toLowerCase());
       const amenitiesMatch = selectedAmenities.every((amenity) => (home.amenities ?? []).includes(amenity));
       const quickMatch = quickFilters.every((filter) => (home.amenities ?? []).includes(filter));
       const holidayMatch =
@@ -1831,7 +1833,7 @@ function DashboardView({
                 </div>
                 <div className="p-3">
                   <strong className="line-clamp-2 text-sm">{home.title}</strong>
-                  <p className="mt-1 text-xs text-[#66756d]">{home.city} · bis {home.maxGuests}</p>
+                  <p className="mt-1 text-xs text-[#66756d]">{home.region || home.city} · {home.city} · bis {home.maxGuests}</p>
                 </div>
               </button>
             ))}
@@ -2063,7 +2065,7 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
             onClick={() => setEditing(home)}
           >
             <strong>{home.title || "Neue Unterkunft"}</strong>
-            <p className="mt-1 text-sm text-[#66756d]">{home.city} · bis {home.maxGuests} Gäste</p>
+            <p className="mt-1 text-sm text-[#66756d]">{home.region || home.city} · {home.city} · bis {home.maxGuests} Gäste</p>
           </button>
         ))}
       </section>
@@ -2440,7 +2442,7 @@ function AdminView({
     ...homesWithoutAvailability.map((home) => ({
       id: `availability-${home.id}`,
       title: `${home.title || "Unterkunft"} ohne aktive freie Zeiträume`,
-      text: home.city || "Bitte Verfügbarkeit prüfen.",
+      text: home.region || home.city || "Bitte Verfügbarkeit prüfen.",
       action: "Häuser öffnen",
       onClick: () => setAdminSection("homes"),
     })),
@@ -2586,7 +2588,7 @@ function AdminView({
               <div key={home.id} className="flex items-center justify-between gap-3 rounded-lg bg-white p-3 shadow-soft">
                 <div>
                   <strong>{home.title}</strong>
-                  <p className="text-sm text-[#66756d]">{home.city} {home.isExternal ? "· extern gepflegt" : ""}</p>
+                  <p className="text-sm text-[#66756d]">{home.region || home.city} · {home.city} {home.isExternal ? "· extern gepflegt" : ""}</p>
                 </div>
                 <IconButton label="Unterkunft löschen" onClick={() => onDeleteHome(home.id)}>
                   <Trash2 size={18} />
@@ -2756,8 +2758,8 @@ function AdminView({
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold"
               onClick={() =>
                 downloadCsv("haeuser.csv", [
-                  ["Titel", "Stadt", "Adresse", "Gäste", "Ausstattung"],
-                  ...state.homes.map((home) => [home.title, home.city, home.address, home.maxGuests, (home.amenities ?? []).join("; ")]),
+                  ["Titel", "Region", "Stadt", "Adresse", "Gäste", "Ausstattung"],
+                  ...state.homes.map((home) => [home.title, home.region, home.city, home.address, home.maxGuests, (home.amenities ?? []).join("; ")]),
                 ])
               }
             >
@@ -2803,7 +2805,7 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3 text-white">
           <div>
             <h3 className="text-lg font-bold">{home.title}</h3>
-            <p className="mt-1 inline-flex items-center gap-1 text-sm text-white/86"><MapPin size={15} /> {home.city}</p>
+            <p className="mt-1 inline-flex items-center gap-1 text-sm text-white/86"><MapPin size={15} /> {home.region || home.city}</p>
           </div>
           <span className="rounded-lg bg-white/92 px-2 py-1 text-xs font-bold text-[#255c37]">bis {home.maxGuests}</span>
         </div>
@@ -2891,7 +2893,7 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
               <h2 className="text-xl font-bold">{home.title}</h2>
               {homeBookingStatus && <AvailabilityStatePill status={homeBookingStatus} />}
             </div>
-            <p className="text-sm text-[#66756d]">{home.city} · {owner ? getProfileName(owner) : "Privates Angebot"}</p>
+            <p className="text-sm text-[#66756d]">{home.region || home.city} · {home.city} · {owner ? getProfileName(owner) : "Privates Angebot"}</p>
           </div>
           <IconButton label="Schliessen" onClick={onClose}>
             <X size={18} />
@@ -2954,7 +2956,7 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
                 <Fact icon={Bath} label={`${home.bathrooms} Bad`} />
               </div>
               <p className="mt-4 inline-flex items-center gap-2 text-sm text-[#66756d]">
-                <MapPin size={16} /> {home.address || home.city}
+                <MapPin size={16} /> {[home.address, home.city, home.region].filter(Boolean).join(", ")}
               </p>
               {owner && owner.visibility !== "private" && (
                 <div className="mt-4 flex items-center gap-3 rounded-lg bg-[#f8faf5] p-3">
@@ -3040,12 +3042,12 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
 }
 
 function MapPreview({ home }) {
-  const query = [home.address, home.city].filter(Boolean).join(", ");
+  const query = [home.address, home.city, home.region].filter(Boolean).join(", ");
 
   if (!query) {
     return (
       <div className="mt-2 rounded-lg border border-dashed border-[#d9dfd5] bg-[#f8faf5] p-4 text-sm text-[#66756d]">
-        Kartenansicht erscheint, sobald Adresse oder Stadt eingetragen ist.
+        Kartenansicht erscheint, sobald Adresse, Stadt oder Region eingetragen ist.
       </div>
     );
   }
@@ -3126,7 +3128,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
   const coverPhoto = photos[coverPhotoIndex];
   const coverCaption = getPhotoCaption(value, coverPhotoIndex);
   const homeIssues = getHomeQualityIssues(value);
-  const homeScore = getCompletionScore(homeIssues, 7);
+  const homeScore = getCompletionScore(homeIssues, 8);
 
   return (
     <section className={compact ? "" : "rounded-lg bg-white p-5 shadow-soft"}>
@@ -3136,6 +3138,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
         <FieldControlled label="Titel" value={value.title} onChange={(title) => updateField("title", title)} />
         <FieldControlled label="Standort/Stadt" value={value.city} onChange={(city) => updateField("city", city)} />
       </div>
+      <FieldControlled label="Region" value={value.region ?? ""} onChange={(region) => updateField("region", region)} placeholder="z. B. Schwarzwald, Ostsee, Bayern" />
       <FieldControlled label="Adresse" value={value.address} onChange={(address) => updateField("address", address)} />
       <div className="grid gap-3 sm:grid-cols-3">
         <FieldControlled label="Max. Gäste" type="number" value={value.maxGuests} onChange={(maxGuests) => updateField("maxGuests", maxGuests)} />
