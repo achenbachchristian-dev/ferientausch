@@ -14,8 +14,10 @@ import {
   doc,
   getFirestore,
   onSnapshot,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -41,9 +43,11 @@ export {
   doc,
   onAuthStateChanged,
   onSnapshot,
+  query,
   setDoc,
   signInAnonymously,
   signInWithEmailAndPassword,
   signOut,
   updateDoc,
+  where,
 };

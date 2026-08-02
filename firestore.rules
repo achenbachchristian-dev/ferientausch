@@ -14,8 +14,14 @@ service cloud.firestore {
 
     match /profiles/{profileId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && profileId == request.auth.uid;
-      allow update: if isAdmin() || profileId == request.auth.uid;
+      allow create: if isSignedIn()
+        && profileId == request.auth.uid
+        && request.resource.data.isAdmin == false;
+      allow update: if isAdmin()
+        || (
+          profileId == request.auth.uid
+          && request.resource.data.isAdmin == resource.data.isAdmin
+        );
       allow delete: if isAdmin() && profileId != request.auth.uid;
     }
 

@@ -39,6 +39,7 @@ import {
   saveLocalState,
   saveRecord,
   subscribeCollection,
+  subscribeRequestsForUser,
 } from "./lib/store";
 
 const tabs = [
@@ -85,7 +86,11 @@ const emptyState = {
 
 function App() {
   const [state, setState] = useState(() => (firebaseEnabled ? emptyState : loadLocalState()));
-  const [currentUserId, setCurrentUserId] = useState(() => window.localStorage.getItem("ferientausch-current-user"));
+  const [currentUserId, setCurrentUserId] = useState(() =>
+    firebaseEnabled ? null : window.localStorage.getItem("ferientausch-current-user"),
+  );
+  const [authChecked, setAuthChecked] = useState(!firebaseEnabled);
+  const [firebaseError, setFirebaseError] = useState("");
   const [activeTab, setActiveTab] = useState("discover");
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
@@ -101,21 +106,16 @@ function App() {
 
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       setCurrentUserId(firebaseUser?.uid ?? null);
+      setAuthChecked(true);
       if (firebaseUser?.uid) {
         window.localStorage.setItem("ferientausch-current-user", firebaseUser.uid);
+      } else {
+        window.localStorage.removeItem("ferientausch-current-user");
       }
     });
 
-    const unsubscribers = [
-      subscribeCollection("profiles", (profiles) => setState((current) => ({ ...current, profiles }))),
-      subscribeCollection("homes", (homes) => setState((current) => ({ ...current, homes }))),
-      subscribeCollection("availabilities", (availabilities) => setState((current) => ({ ...current, availabilities }))),
-      subscribeCollection("exchangeRequests", (requests) => setState((current) => ({ ...current, requests }))),
-    ];
-
     return () => {
       unsubscribeAuth();
-      unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
   }, []);
 
@@ -123,6 +123,40 @@ function App() {
     () => state.profiles.find((profile) => profile.id === currentUserId),
     [currentUserId, state.profiles],
   );
+
+  useEffect(() => {
+    if (!firebaseEnabled || !currentUserId) {
+      return;
+    }
+
+    const handleError = (error) => setFirebaseError(formatFirebaseError(error));
+    const unsubscribers = [
+      subscribeCollection("profiles", (profiles) => setState((current) => ({ ...current, profiles })), handleError),
+      subscribeCollection("homes", (homes) => setState((current) => ({ ...current, homes })), handleError),
+      subscribeCollection(
+        "availabilities",
+        (availabilities) => setState((current) => ({ ...current, availabilities })),
+        handleError,
+      ),
+    ];
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!firebaseEnabled || !currentUserId) {
+      return;
+    }
+
+    return subscribeRequestsForUser(
+      currentUserId,
+      Boolean(currentProfile?.isAdmin),
+      (requests) => setState((current) => ({ ...current, requests })),
+      (error) => setFirebaseError(formatFirebaseError(error)),
+    );
+  }, [currentProfile?.isAdmin, currentUserId]);
 
   const ownedHomes = useMemo(() => {
     if (!currentProfile) {
@@ -177,19 +211,24 @@ function App() {
     const city = String(formData.get("city") ?? "").trim();
 
     if (firebaseEnabled) {
-      if (authMode === "register") {
-        const credentials = await createUserWithEmailAndPassword(auth, email, password);
-        const profile = {
-          id: credentials.user.uid,
-          familyName,
-          city,
-          email,
-          description: "Neu im FerienTausch.",
-          isAdmin: state.profiles.length === 0,
-        };
-        await saveRecord("profiles", profile);
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
+      try {
+        setFirebaseError("");
+        if (authMode === "register") {
+          const credentials = await createUserWithEmailAndPassword(auth, email, password);
+          const profile = {
+            id: credentials.user.uid,
+            familyName,
+            city,
+            email,
+            description: "Neu im FerienTausch.",
+            isAdmin: false,
+          };
+          await saveRecord("profiles", profile);
+        } else {
+          await signInWithEmailAndPassword(auth, email, password);
+        }
+      } catch (error) {
+        setFirebaseError(formatFirebaseError(error));
       }
       return;
     }
@@ -216,16 +255,21 @@ function App() {
 
   async function handleAnonymousLogin() {
     if (firebaseEnabled) {
-      const credentials = await signInAnonymously(auth);
-      const guestProfile = {
-        id: credentials.user.uid,
-        familyName: "Gastfamilie",
-        city: "",
-        email: "",
-        description: "Anonymer Gastzugang.",
-        isAdmin: false,
-      };
-      await saveRecord("profiles", guestProfile);
+      try {
+        setFirebaseError("");
+        const credentials = await signInAnonymously(auth);
+        const guestProfile = {
+          id: credentials.user.uid,
+          familyName: "Gastfamilie",
+          city: "",
+          email: "",
+          description: "Anonymer Gastzugang.",
+          isAdmin: false,
+        };
+        await saveRecord("profiles", guestProfile);
+      } catch (error) {
+        setFirebaseError(formatFirebaseError(error));
+      }
       return;
     }
 
@@ -375,8 +419,31 @@ function App() {
     }));
   }
 
+  if (firebaseEnabled && !authChecked) {
+    return <LoadingScreen title="Firebase wird verbunden" text="Einen Moment, die Anmeldung wird geprueft." />;
+  }
+
   if (!currentProfile) {
-    return <AuthScreen authMode={authMode} onAuthModeChange={setAuthMode} onSubmit={handleAuthSubmit} onAnonymous={handleAnonymousLogin} />;
+    if (firebaseEnabled && currentUserId) {
+      return (
+        <LoadingScreen
+          title="Profil wird geladen"
+          text="Falls diese Ansicht bleibt, pruefe die Firestore-Regeln und ob dein Profil-Dokument existiert."
+          error={firebaseError}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    return (
+      <AuthScreen
+        authMode={authMode}
+        error={firebaseError}
+        onAuthModeChange={setAuthMode}
+        onSubmit={handleAuthSubmit}
+        onAnonymous={handleAnonymousLogin}
+      />
+    );
   }
 
   return (
@@ -425,6 +492,7 @@ function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        {firebaseError && <FirebaseErrorBanner message={firebaseError} onDismiss={() => setFirebaseError("")} />}
         {activeTab === "discover" && (
           <DiscoverView
             homes={filteredHomes}
@@ -485,7 +553,7 @@ function App() {
   );
 }
 
-function AuthScreen({ authMode, onAuthModeChange, onSubmit, onAnonymous }) {
+function AuthScreen({ authMode, error, onAuthModeChange, onSubmit, onAnonymous }) {
   return (
     <main className="min-h-screen bg-[#f5f3ee]">
       <section className="relative grid min-h-screen place-items-center overflow-hidden px-4 py-10">
@@ -541,10 +609,42 @@ function AuthScreen({ authMode, onAuthModeChange, onSubmit, onAnonymous }) {
             >
               <ChevronRight size={18} /> Demo betreten
             </button>
+            {error && <p className="mt-3 rounded-lg bg-[#f4d3cd] p-3 text-sm font-semibold text-[#8a332b]">{error}</p>}
           </form>
         </div>
       </section>
     </main>
+  );
+}
+
+function LoadingScreen({ title, text, error, onLogout }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-[#f5f3ee] px-4">
+      <section className="w-full max-w-md rounded-lg bg-white p-5 text-center shadow-soft">
+        <div className="mx-auto grid h-12 w-12 place-items-center rounded-lg bg-[#dcedd8] text-[#255c37]">
+          <Sparkles size={22} />
+        </div>
+        <h1 className="mt-4 text-xl font-bold">{title}</h1>
+        <p className="mt-2 text-sm leading-6 text-[#66756d]">{text}</p>
+        {error && <p className="mt-4 rounded-lg bg-[#f4d3cd] p-3 text-sm font-semibold text-[#8a332b]">{error}</p>}
+        {onLogout && (
+          <button className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={onLogout}>
+            <LogOut size={17} /> Abmelden
+          </button>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function FirebaseErrorBanner({ message, onDismiss }) {
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[#d8b3aa] bg-[#fbe8e4] p-3 text-sm text-[#74342c] sm:flex-row sm:items-center sm:justify-between">
+      <strong>{message}</strong>
+      <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 font-semibold" onClick={onDismiss}>
+        Schliessen
+      </button>
+    </div>
   );
 }
 
@@ -1184,6 +1284,32 @@ function fileToDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function formatFirebaseError(error) {
+  const code = error?.code ?? "";
+
+  if (code.includes("permission-denied")) {
+    return "Firebase blockiert den Zugriff. Pruefe Firestore-Regeln und ob du angemeldet bist.";
+  }
+
+  if (code.includes("auth/unauthorized-domain")) {
+    return "Diese Domain ist in Firebase Authentication noch nicht autorisiert.";
+  }
+
+  if (code.includes("auth/invalid-credential") || code.includes("auth/wrong-password")) {
+    return "Login fehlgeschlagen. Bitte E-Mail und Passwort pruefen.";
+  }
+
+  if (code.includes("auth/email-already-in-use")) {
+    return "Diese E-Mail ist bereits registriert.";
+  }
+
+  if (code.includes("auth/operation-not-allowed")) {
+    return "Diese Login-Methode ist in Firebase Authentication noch nicht aktiviert.";
+  }
+
+  return error?.message ?? "Firebase-Fehler. Bitte Konfiguration und Regeln pruefen.";
 }
 
 export default App;

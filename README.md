@@ -27,7 +27,8 @@ Ohne Firebase-Konfiguration startet die App im Demo-Modus mit lokalen Beispielda
 1. Firebase-Projekt erstellen.
 2. Authentication aktivieren: E-Mail/Passwort und optional Anonym.
 3. Firestore Database erstellen.
-4. `.env.example` nach `.env.local` kopieren und Werte eintragen.
+4. Firestore-Regeln aus `firestore.rules` in der Firebase Console veroeffentlichen.
+5. `.env.example` nach `.env.local` kopieren und Werte eintragen.
 
 ```bash
 VITE_FIREBASE_API_KEY=...
@@ -44,6 +45,20 @@ Die App nutzt diese Collections:
 - `homes`
 - `availabilities`
 - `exchangeRequests`
+
+Collections muessen nicht manuell angelegt werden. Firestore erstellt sie beim ersten Speichern automatisch.
+
+### Ersten Admin setzen
+
+Aus Sicherheitsgruenden vergibt die Web-App in Firebase keine Admin-Rechte automatisch. Vorgehen:
+
+1. In der veroeffentlichten App ein erstes Konto registrieren.
+2. Firebase Console oeffnen: Firestore Database -> Data -> `profiles`.
+3. Das Profil-Dokument des ersten Nutzers oeffnen.
+4. Feld `isAdmin` von `false` auf `true` setzen.
+5. App neu laden.
+
+Danach erscheint in der App die Admin-Zentrale.
 
 ## Vercel Deployment
 

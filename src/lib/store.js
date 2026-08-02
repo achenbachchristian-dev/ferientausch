@@ -6,8 +6,10 @@ import {
   doc,
   firebaseEnabled,
   onSnapshot,
+  query,
   setDoc,
   updateDoc,
+  where,
 } from "./firebase";
 import { createSeedState } from "./demoData";
 
@@ -40,14 +42,62 @@ export function createId(prefix) {
   return `${prefix}-${randomPart}`;
 }
 
-export function subscribeCollection(name, onValue) {
+export function subscribeCollection(name, onValue, onError) {
   if (!firebaseEnabled) {
     return () => {};
   }
 
-  return onSnapshot(collection(db, name), (snapshot) => {
-    onValue(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
-  });
+  return onSnapshot(
+    collection(db, name),
+    (snapshot) => {
+      onValue(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+    },
+    onError,
+  );
+}
+
+export function subscribeRequestsForUser(userId, isAdmin, onValue, onError) {
+  if (!firebaseEnabled || !userId) {
+    return () => {};
+  }
+
+  if (isAdmin) {
+    return subscribeCollection("exchangeRequests", onValue, onError);
+  }
+
+  const requestsById = new Map();
+
+  const publish = () => {
+    onValue(Array.from(requestsById.values()));
+  };
+
+  const handleSnapshot = (snapshot, ownedField) => {
+    snapshot.docs.forEach((entry) => {
+      requestsById.set(entry.id, { id: entry.id, ...entry.data() });
+    });
+
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === "removed") {
+        const data = change.doc.data();
+        if (data[ownedField] === userId) {
+          requestsById.delete(change.doc.id);
+        }
+      }
+    });
+
+    publish();
+  };
+
+  const sentQuery = query(collection(db, "exchangeRequests"), where("fromUserId", "==", userId));
+  const receivedQuery = query(collection(db, "exchangeRequests"), where("toUserId", "==", userId));
+
+  const unsubscribeSent = onSnapshot(sentQuery, (snapshot) => handleSnapshot(snapshot, "fromUserId"), onError);
+  const unsubscribeReceived = onSnapshot(receivedQuery, (snapshot) => handleSnapshot(snapshot, "toUserId"), onError);
+
+  return () => {
+    unsubscribeSent();
+    unsubscribeReceived();
+  };
 }
 
 export async function saveRecord(collectionName, record) {
