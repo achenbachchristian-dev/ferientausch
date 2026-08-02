@@ -60,6 +60,7 @@ import {
   subscribeCollection,
   subscribeRequestsForUser,
   uploadHomePhoto,
+  uploadProfilePhoto,
 } from "./lib/store";
 
 const tabs = [
@@ -975,6 +976,20 @@ function App() {
     return fileToDataUrl(file);
   }
 
+  async function handleProfilePhotoUpload(profileId, file) {
+    try {
+      setFirebaseError("");
+      const uploadedUrl = await uploadProfilePhoto(profileId, file);
+      if (uploadedUrl) {
+        return uploadedUrl;
+      }
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
+
+    return fileToDataUrl(file);
+  }
+
   if (firebaseEnabled && !authChecked) {
     return <LoadingScreen title="Firebase wird verbunden" text="Einen Moment, die Anmeldung wird geprüft." />;
   }
@@ -1121,7 +1136,7 @@ function App() {
             onDelete={deleteRequest}
           />
         )}
-        {activeTab === "profile" && <ProfileView profile={currentProfile} onSave={saveProfile} />}
+        {activeTab === "profile" && <ProfileView profile={currentProfile} onSave={saveProfile} onUploadPhoto={handleProfilePhotoUpload} />}
         {activeTab === "admin" && currentProfile.isAdmin && (
           <AdminView
             state={state}
@@ -1865,8 +1880,36 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
   );
 }
 
-function ProfileView({ profile, onSave }) {
+function ProfileView({ profile, onSave, onUploadPhoto }) {
   const [form, setForm] = useState(profile);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadNote, setUploadNote] = useState("");
+
+  useEffect(() => {
+    setForm(profile);
+  }, [profile]);
+
+  async function handlePhotoFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setUploadingPhoto(true);
+    setUploadNote("Profilbild wird vorbereitet...");
+    const preparedFile = await compressImageFile(file);
+    setUploadNote(
+      preparedFile.size < file.size
+        ? `Komprimiert von ${formatFileSize(file.size)} auf ${formatFileSize(preparedFile.size)}.`
+        : `Dateigröße: ${formatFileSize(file.size)}.`,
+    );
+    const photoUrl = onUploadPhoto ? await onUploadPhoto(form.id, preparedFile) : await fileToDataUrl(preparedFile);
+    const nextForm = { ...form, photoUrl };
+    setForm(nextForm);
+    await onSave(nextForm);
+    setUploadingPhoto(false);
+    event.target.value = "";
+  }
 
   return (
     <section className="max-w-2xl rounded-lg bg-white p-5 shadow-soft">
@@ -1885,6 +1928,11 @@ function ProfileView({ profile, onSave }) {
       </div>
       <FieldControlled label="E-Mail" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
       <FieldControlled label="Profilbild-URL" value={form.photoUrl ?? ""} onChange={(photoUrl) => setForm({ ...form, photoUrl })} placeholder="https://..." />
+      <label className="mt-3 inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#24313a] px-4 font-semibold text-white">
+        <ImagePlus size={18} /> {uploadingPhoto ? "Lädt..." : "Profilbild hochladen"}
+        <input className="sr-only" type="file" accept="image/*" onChange={handlePhotoFile} />
+      </label>
+      {uploadNote && <p className="mt-2 text-xs font-semibold text-[#66756d]">{uploadNote}</p>}
       <label className="mt-3 inline-flex cursor-pointer items-center gap-3 rounded-lg border border-[#cfd7cd] bg-[#f8faf5] px-3 py-2 text-sm font-semibold">
         <input
           className="h-5 w-5 accent-[#2d6a62]"

@@ -146,3 +146,15 @@ export async function uploadHomePhoto(homeId, file) {
   await uploadBytes(reference, file, { contentType: file.type });
   return getDownloadURL(reference);
 }
+
+export async function uploadProfilePhoto(profileId, file) {
+  if (!firebaseEnabled || !storage) {
+    return null;
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const path = `profiles/${profileId}/${createId("avatar")}-${safeName}`;
+  const reference = storageRef(storage, path);
+  await uploadBytes(reference, file, { contentType: file.type });
+  return getDownloadURL(reference);
+}
