@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Home,
   ImagePlus,
+  LayoutDashboard,
   LogOut,
   Mail,
   MapPin,
@@ -44,6 +45,7 @@ import {
 } from "./lib/store";
 
 const tabs = [
+  { id: "dashboard", label: "Start", icon: LayoutDashboard },
   { id: "discover", label: "Entdecken", icon: Search },
   { id: "my-home", label: "Mein Haus", icon: Home },
   { id: "calendar", label: "Kalender", icon: CalendarDays },
@@ -101,7 +103,7 @@ function App() {
   );
   const [authChecked, setAuthChecked] = useState(!firebaseEnabled);
   const [firebaseError, setFirebaseError] = useState("");
-  const [activeTab, setActiveTab] = useState("discover");
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
   const [query, setQuery] = useState("");
@@ -211,6 +213,24 @@ function App() {
 
     return findMatches(state.availabilities, state.homes, currentProfile.id);
   }, [currentProfile, state.availabilities, state.homes]);
+
+  const visibleRequests = useMemo(() => {
+    if (!currentProfile) {
+      return [];
+    }
+
+    return state.requests.filter(
+      (request) =>
+        request.fromUserId === currentProfile.id ||
+        request.toUserId === currentProfile.id ||
+        currentProfile.isAdmin,
+    );
+  }, [currentProfile, state.requests]);
+
+  const openRequests = useMemo(
+    () => visibleRequests.filter((request) => request.status === "pending"),
+    [visibleRequests],
+  );
 
   const filteredHomes = useMemo(() => {
     return state.homes.filter((home) => {
@@ -558,13 +578,14 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#f5f3ee] text-[#24313a]">
-      <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-[#f5f3ee]/95 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-[#f7f4ed]/95 shadow-[0_10px_30px_rgba(36,49,58,0.06)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-lg bg-[#2d6a62] text-white">
+            <div className="grid h-12 w-12 place-items-center rounded-lg bg-[#2d6a62] text-white shadow-soft">
               <Home size={22} />
             </div>
             <div>
+              <p className="text-xs font-bold uppercase text-[#6e7a72]">Privater Haustausch im Freundeskreis</p>
               <h1 className="text-2xl font-bold tracking-normal">FerienTausch</h1>
               <p className="text-sm text-[#5f6e67]">{getProfileName(currentProfile)} aus {currentProfile.city || "dem Freundeskreis"}</p>
             </div>
@@ -588,8 +609,8 @@ function App() {
             return (
               <button
                 key={tab.id}
-                className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${
-                  active ? "bg-[#24313a] text-white" : "bg-white text-[#4f5d55] hover:bg-[#edf1e8]"
+                className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${
+                  active ? "bg-[#24313a] text-white shadow-soft" : "bg-white/85 text-[#4f5d55] hover:bg-[#edf1e8]"
                 }`}
                 onClick={() => setActiveTab(tab.id)}
               >
@@ -603,6 +624,20 @@ function App() {
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         {firebaseError && <FirebaseErrorBanner message={firebaseError} onDismiss={() => setFirebaseError("")} />}
+        {activeTab === "dashboard" && (
+          <DashboardView
+            currentProfile={currentProfile}
+            ownedHomes={ownedHomes}
+            homes={state.homes}
+            availabilities={state.availabilities}
+            requests={visibleRequests}
+            openRequests={openRequests}
+            matches={matches}
+            profiles={state.profiles}
+            onNavigate={setActiveTab}
+            onRequest={setRequestDraft}
+          />
+        )}
         {activeTab === "discover" && (
           <DiscoverView
             homes={filteredHomes}
@@ -758,6 +793,192 @@ function FirebaseErrorBanner({ message, onDismiss }) {
           Schliessen
         </button>
       )}
+    </div>
+  );
+}
+
+function DashboardView({
+  currentProfile,
+  ownedHomes,
+  homes,
+  availabilities,
+  requests,
+  openRequests,
+  matches,
+  profiles,
+  onNavigate,
+  onRequest,
+}) {
+  const ownedHomeIds = new Set(ownedHomes.map((home) => home.id));
+  const nextAvailabilities = availabilities
+    .filter((availability) => ownedHomeIds.has(availability.homeId))
+    .sort((first, second) => first.start.localeCompare(second.start))
+    .slice(0, 3);
+  const featuredHomes = homes.filter((home) => home.ownerId !== currentProfile.id).slice(0, 3);
+  const firstOwnedHome = ownedHomes[0];
+
+  return (
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-lg bg-[#24313a] text-white shadow-soft">
+        <div className="grid gap-5 p-5 md:grid-cols-[1.2fr_0.8fr] md:p-6">
+          <div>
+            <p className="text-sm font-semibold text-[#c7d5c4]">Willkommen zurueck, {getProfileName(currentProfile)}</p>
+            <h2 className="mt-2 max-w-2xl text-3xl font-bold tracking-normal">
+              Alles fuer euren naechsten Haustausch an einem Ort.
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/78">
+              Behalte freie Zeitraeume, passende Matches und offene Anfragen im Blick.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <DashboardAction icon={Home} label={firstOwnedHome ? "Mein Haus bearbeiten" : "Haus anlegen"} onClick={() => onNavigate("my-home")} />
+              <DashboardAction icon={CalendarDays} label="Zeitraum eintragen" onClick={() => onNavigate("calendar")} />
+              <DashboardAction icon={Sparkles} label="Matches ansehen" onClick={() => onNavigate("matcher")} />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 rounded-lg bg-white/8 p-3">
+            <DashboardMetric label="Haeuser" value={ownedHomes.length} />
+            <DashboardMetric label="Offen" value={openRequests.length} />
+            <DashboardMetric label="Matches" value={matches.length} />
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-lg bg-white p-4 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Aktuelle Matches</h2>
+              <p className="mt-1 text-sm text-[#66756d]">Zeitraeume mit mindestens drei passenden Tagen.</p>
+            </div>
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("matcher")}>
+              Alle <ChevronRight size={17} />
+            </button>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {matches.slice(0, 2).map((match) => (
+              <div key={match.id} className="flex flex-col gap-3 rounded-lg border border-[#edf0ea] p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <Pill tone="green">{match.overlap.days} Tage</Pill>
+                  <h3 className="mt-2 font-bold">{match.targetHome.title}</h3>
+                  <p className="text-sm text-[#66756d]">{match.targetHome.city} · {formatDateRange(match.overlap.start, match.overlap.end)}</p>
+                </div>
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-3 text-sm font-semibold text-white"
+                  onClick={() =>
+                    onRequest({
+                      homeId: match.targetHome.id,
+                      start: match.overlap.start,
+                      end: match.overlap.end,
+                      guests: Math.min(4, match.targetHome.maxGuests),
+                      message: `Unser Zeitraum passt ${match.overlap.days} Tage zu eurem Angebot.`,
+                    })
+                  }
+                >
+                  <Send size={17} /> Anfrage
+                </button>
+              </div>
+            ))}
+            {!matches.length && <EmptyState title="Noch keine Matches" text="Trage freie Zeitraeume ein, dann prueft der Smart Matcher automatisch passende Ueberschneidungen." />}
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-white p-4 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Offene Anfragen</h2>
+              <p className="mt-1 text-sm text-[#66756d]">Alles, was noch entschieden werden muss.</p>
+            </div>
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("requests")}>
+              Oeffnen <ChevronRight size={17} />
+            </button>
+          </div>
+          <div className="mt-4 space-y-3">
+            {openRequests.slice(0, 3).map((request) => {
+              const requestHome = homes.find((home) => home.id === request.homeId);
+              const from = profiles.find((profile) => profile.id === request.fromUserId);
+              return (
+                <div key={request.id} className="rounded-lg border border-[#edf0ea] p-3">
+                  <strong>{requestHome?.title ?? "Unterkunft"}</strong>
+                  <p className="mt-1 text-sm text-[#66756d]">{formatDateRange(request.start, request.end)} · {request.guests} Personen · {getProfileName(from)}</p>
+                </div>
+              );
+            })}
+            {!openRequests.length && <EmptyState title="Nichts offen" text="Neue Tauschanfragen erscheinen automatisch hier." />}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="rounded-lg bg-white p-4 shadow-soft">
+          <h2 className="text-xl font-bold">Naechste freie Zeitraeume</h2>
+          <div className="mt-4 space-y-3">
+            {nextAvailabilities.map((availability) => (
+              <DateRow
+                key={availability.id}
+                title={availability.title}
+                subtitle={ownedHomes.find((home) => home.id === availability.homeId)?.title ?? "Unterkunft"}
+                start={availability.start}
+                end={availability.end}
+              />
+            ))}
+            {!nextAvailabilities.length && <EmptyState title="Noch keine Zeitraeume" text="Lege deinen ersten freien Zeitraum an." />}
+          </div>
+        </div>
+        <div className="rounded-lg bg-white p-4 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-bold">Zum Entdecken</h2>
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("discover")}>
+              Entdecken <ChevronRight size={17} />
+            </button>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {featuredHomes.map((home) => (
+              <button key={home.id} className="overflow-hidden rounded-lg border border-[#edf0ea] bg-white text-left" onClick={() => onNavigate("discover")}>
+                <div className="aspect-[4/3] bg-[#edf1e8]">
+                  <img className="h-full w-full object-cover" src={home.photos[0] || "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80"} alt="" />
+                </div>
+                <div className="p-3">
+                  <strong className="line-clamp-2 text-sm">{home.title}</strong>
+                  <p className="mt-1 text-xs text-[#66756d]">{home.city} · bis {home.maxGuests}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DashboardAction({ icon: Icon, label, onClick }) {
+  return (
+    <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-[#24313a]" onClick={onClick}>
+      <Icon size={17} /> {label}
+    </button>
+  );
+}
+
+function DashboardMetric({ label, value }) {
+  return (
+    <div className="rounded-lg bg-white/10 p-3 text-center">
+      <strong className="block text-2xl">{value}</strong>
+      <span className="text-xs font-semibold uppercase text-white/70">{label}</span>
+    </div>
+  );
+}
+
+function DateRow({ title, subtitle, start, end }) {
+  const date = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(new Date(start));
+
+  return (
+    <div className="flex gap-3 rounded-lg border border-[#edf0ea] p-3">
+      <div className="grid h-14 w-16 shrink-0 place-items-center rounded-lg bg-[#edf1e8] text-center text-sm font-bold text-[#2d6a62]">
+        {date}
+      </div>
+      <div>
+        <strong>{title}</strong>
+        <p className="mt-1 text-sm text-[#66756d]">{subtitle} · {formatDateRange(start, end)}</p>
+      </div>
     </div>
   );
 }
@@ -1066,21 +1287,22 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onToggleAd
 
 function HomeCard({ home, availabilities, disabled, onRequest }) {
   return (
-    <article className="overflow-hidden rounded-lg bg-white shadow-soft">
+    <article className="group overflow-hidden rounded-lg border border-white bg-white shadow-soft transition hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(32,45,54,0.16)]">
       <div className="relative aspect-[4/3] bg-[#dfe5dc]">
         <img className="h-full w-full object-cover" src={home.photos[0] || "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80"} alt="" />
+        <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent" />
         <div className="absolute left-3 top-3 flex gap-2">
           {home.isExternal && <Pill tone="amber">Extern</Pill>}
         </div>
-      </div>
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-3">
+        <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3 text-white">
           <div>
             <h3 className="text-lg font-bold">{home.title}</h3>
-            <p className="mt-1 inline-flex items-center gap-1 text-sm text-[#66756d]"><MapPin size={15} /> {home.city}</p>
+            <p className="mt-1 inline-flex items-center gap-1 text-sm text-white/86"><MapPin size={15} /> {home.city}</p>
           </div>
-          <Pill tone="green">bis {home.maxGuests}</Pill>
+          <span className="rounded-lg bg-white/92 px-2 py-1 text-xs font-bold text-[#255c37]">bis {home.maxGuests}</span>
         </div>
+      </div>
+      <div className="p-4">
         <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#4f5d55]">{home.description}</p>
         <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
           <Fact icon={Users} label={`${home.maxGuests} Gaeste`} />
@@ -1092,11 +1314,16 @@ function HomeCard({ home, availabilities, disabled, onRequest }) {
         </div>
         <div className="mt-4 space-y-2">
           {availabilities.slice(0, 2).map((availability) => (
-            <div key={availability.id} className="rounded-lg bg-[#f6f8f3] px-3 py-2 text-sm">
+            <div key={availability.id} className="rounded-lg border border-[#dfe8dc] bg-[#f6f8f3] px-3 py-2 text-sm">
               <strong>{availability.title}</strong>
               <span className="ml-2 text-[#66756d]">{formatDateRange(availability.start, availability.end)}</span>
             </div>
           ))}
+          {!availabilities.length && (
+            <div className="rounded-lg border border-dashed border-[#d9dfd5] px-3 py-2 text-sm text-[#66756d]">
+              Noch keine freien Zeitraeume
+            </div>
+          )}
         </div>
         <button
           className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
