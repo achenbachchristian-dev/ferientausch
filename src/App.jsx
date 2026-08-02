@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bath,
   BedDouble,
+  Bell,
   CalendarDays,
   Check,
   ChevronRight,
@@ -103,6 +104,7 @@ function App() {
   );
   const [authChecked, setAuthChecked] = useState(!firebaseEnabled);
   const [firebaseError, setFirebaseError] = useState("");
+  const [appNotice, setAppNotice] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
@@ -110,6 +112,7 @@ function App() {
   const [minGuests, setMinGuests] = useState("");
   const [travelStart, setTravelStart] = useState("");
   const [travelEnd, setTravelEnd] = useState("");
+  const knownProfileIdsRef = useRef(new Set());
 
   useEffect(() => {
     if (!firebaseEnabled) {
@@ -135,6 +138,33 @@ function App() {
     () => state.profiles.find((profile) => profile.id === currentUserId),
     [currentUserId, state.profiles],
   );
+
+  useEffect(() => {
+    if (!currentProfile?.isAdmin) {
+      knownProfileIdsRef.current = new Set(state.profiles.map((profile) => profile.id));
+      return;
+    }
+
+    if (!knownProfileIdsRef.current.size) {
+      knownProfileIdsRef.current = new Set(state.profiles.map((profile) => profile.id));
+      return;
+    }
+
+    const newProfiles = state.profiles.filter((profile) => !knownProfileIdsRef.current.has(profile.id));
+    knownProfileIdsRef.current = new Set(state.profiles.map((profile) => profile.id));
+
+    if (!currentProfile.notifyOnNewRegistrations || !newProfiles.length) {
+      return;
+    }
+
+    const names = newProfiles.map(getProfileName).join(", ");
+    const message = newProfiles.length === 1 ? `Neue Registrierung: ${names}` : `Neue Registrierungen: ${names}`;
+    setAppNotice(message);
+
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("FerienTausch", { body: message });
+    }
+  }, [currentProfile, state.profiles]);
 
   useEffect(() => {
     if (!firebaseEnabled || !currentUserId) {
@@ -623,6 +653,7 @@ function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        {appNotice && <AppNoticeBanner message={appNotice} onDismiss={() => setAppNotice("")} />}
         {firebaseError && <FirebaseErrorBanner message={firebaseError} onDismiss={() => setFirebaseError("")} />}
         {activeTab === "dashboard" && (
           <DashboardView
@@ -686,6 +717,7 @@ function App() {
             currentProfile={currentProfile}
             onSaveHome={upsertHome}
             onDeleteHome={deleteHome}
+            onSaveProfile={saveProfile}
             onToggleAdmin={toggleAdmin}
             onDeleteProfile={deleteProfile}
           />
@@ -793,6 +825,17 @@ function FirebaseErrorBanner({ message, onDismiss }) {
           Schliessen
         </button>
       )}
+    </div>
+  );
+}
+
+function AppNoticeBanner({ message, onDismiss }) {
+  return (
+    <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[#b8d8b1] bg-[#e8f6e5] p-3 text-sm text-[#255c37] sm:flex-row sm:items-center sm:justify-between">
+      <strong>{message}</strong>
+      <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 font-semibold" onClick={onDismiss}>
+        Schliessen
+      </button>
     </div>
   );
 }
@@ -1212,7 +1255,7 @@ function ProfileView({ profile, onSave }) {
   );
 }
 
-function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onToggleAdmin, onDeleteProfile }) {
+function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onSaveProfile, onToggleAdmin, onDeleteProfile }) {
   const [externalHome, setExternalHome] = useState({
     ...blankHouse,
     id: createId("home"),
@@ -1221,6 +1264,14 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onToggleAd
     isExternal: true,
   });
 
+  async function updateRegistrationNotificationPreference(enabled) {
+    if (enabled) {
+      await requestBrowserNotificationPermission();
+    }
+
+    onSaveProfile({ ...currentProfile, notifyOnNewRegistrations: enabled });
+  }
+
   return (
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-3">
@@ -1228,6 +1279,30 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onToggleAd
         <Metric label="Mitglieder" value={state.profiles.length} />
         <Metric label="Tauschanfragen" value={state.requests.length} />
       </div>
+      <section className="rounded-lg bg-white p-4 shadow-soft">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#dcedd8] text-[#255c37]">
+              <Bell size={18} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Admin-Benachrichtigungen</h2>
+              <p className="mt-1 text-sm text-[#66756d]">
+                Informiert dich in der App und per Browser-Hinweis, wenn sich jemand neu registriert.
+              </p>
+            </div>
+          </div>
+          <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-[#cfd7cd] bg-[#f8faf5] px-3 py-2 text-sm font-semibold">
+            <input
+              className="h-5 w-5 accent-[#2d6a62]"
+              type="checkbox"
+              checked={Boolean(currentProfile.notifyOnNewRegistrations)}
+              onChange={(event) => updateRegistrationNotificationPreference(event.target.checked)}
+            />
+            Neue Registrierungen
+          </label>
+        </div>
+      </section>
       <section className="rounded-lg bg-white p-4 shadow-soft">
         <h2 className="text-xl font-bold">Mitglieder & Rechte</h2>
         <div className="mt-3 divide-y divide-[#edf0ea]">
@@ -1781,6 +1856,14 @@ function fileToDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+async function requestBrowserNotificationPermission() {
+  if (!("Notification" in window) || Notification.permission !== "default") {
+    return;
+  }
+
+  await Notification.requestPermission();
 }
 
 function formatFirebaseError(error) {
