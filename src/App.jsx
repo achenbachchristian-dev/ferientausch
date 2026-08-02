@@ -664,10 +664,10 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#f5f3ee] text-[#24313a]">
-      <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-[#f7f4ed]/95 shadow-[0_10px_30px_rgba(36,49,58,0.06)] backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-white/95 shadow-[0_10px_30px_rgba(36,49,58,0.06)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-white px-3 py-2 shadow-soft">
+            <div className="rounded-lg bg-white px-3 py-2">
               <img className="h-12 w-auto max-w-[240px] object-contain" src="/logo-wordmark.png" alt="FerienTausch" />
             </div>
             <div className="hidden sm:block">
@@ -695,7 +695,7 @@ function App() {
               <button
                 key={tab.id}
                 className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${
-                  active ? "bg-[#24313a] text-white shadow-soft" : "bg-white/85 text-[#4f5d55] hover:bg-[#edf1e8]"
+                  active ? "bg-[#24313a] text-white shadow-soft" : "bg-[#f8faf5] text-[#4f5d55] hover:bg-[#edf1e8]"
                 }`}
                 onClick={() => setActiveTab(tab.id)}
               >
