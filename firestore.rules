@@ -33,6 +33,12 @@ service cloud.firestore {
       allow delete: if isAdmin() && profileId != request.auth.uid;
     }
 
+    match /settings/{settingId} {
+      allow read: if settingId == "public";
+      allow create, update: if isAdmin() && settingId == "public";
+      allow delete: if isAdmin();
+    }
+
     match /homes/{homeId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && (request.resource.data.ownerId == request.auth.uid || isAdmin());

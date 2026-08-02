@@ -60,6 +60,20 @@ export function subscribeCollection(name, onValue, onError) {
   );
 }
 
+export function subscribeRecord(collectionName, id, onValue, onError) {
+  if (!firebaseEnabled) {
+    return () => {};
+  }
+
+  return onSnapshot(
+    doc(db, collectionName, id),
+    (snapshot) => {
+      onValue(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+    },
+    onError,
+  );
+}
+
 export function subscribeRequestsForUser(userId, isAdmin, onValue, onError) {
   if (!firebaseEnabled || !userId) {
     return () => {};

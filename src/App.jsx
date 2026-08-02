@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bath,
   BedDouble,
@@ -58,6 +58,7 @@ import {
   saveLocalState,
   saveRecord,
   subscribeCollection,
+  subscribeRecord,
   subscribeRequestsForUser,
   uploadHomePhoto,
   uploadProfilePhoto,
@@ -99,7 +100,7 @@ const statusLabels = {
   declined: "Abgelehnt",
 };
 
-const INVITE_CODE = import.meta.env.VITE_INVITE_CODE || "ferien2026";
+const DEFAULT_INVITE_CODE = import.meta.env.VITE_INVITE_CODE || "ferien2026";
 const discoverFilterAmenities = ["WLAN", "Garten", "Pool", "Sauna", "Haustiere erlaubt", "Kinderfreundlich", "Strandnähe", "ÖPNV in der Nähe"];
 const profilePhotoFallback =
   "https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?auto=format&fit=crop&w=500&q=80";
@@ -119,6 +120,17 @@ function getProfileName(profile) {
 
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
   return fullName || profile.familyName || profile.email || "Unbekannt";
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function isProfileApproved(profile) {
@@ -194,6 +206,14 @@ function getCalendarDayStatus(homeId, isoDate, availabilities = [], bookings = [
   }
 
   return available ? "free" : "none";
+}
+
+function isValidDateRange(start, end) {
+  return Boolean(start && end && start <= end);
+}
+
+function overlapsExistingRange(range, ranges = []) {
+  return ranges.some((entry) => entry.id !== range.id && entry.homeId === range.homeId && rangesOverlap(entry, range));
 }
 
 function csvValue(value) {
@@ -318,6 +338,9 @@ function App() {
   const [selectedAmenities, setSelectedAmenities] = useState([]);
   const [availabilityMode, setAvailabilityMode] = useState("all");
   const [adminSection, setAdminSection] = useState("overview");
+  const [inviteCode, setInviteCode] = useState(
+    () => window.localStorage.getItem("ferientausch-invite-code") || DEFAULT_INVITE_CODE,
+  );
   const knownProfileIdsRef = useRef(new Set());
 
   useEffect(() => {
@@ -338,6 +361,25 @@ function App() {
     return () => {
       unsubscribeAuth();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseEnabled) {
+      return;
+    }
+
+    return subscribeRecord(
+      "settings",
+      "public",
+      (settings) => {
+        const nextCode = String(settings?.inviteCode || DEFAULT_INVITE_CODE).trim() || DEFAULT_INVITE_CODE;
+        setInviteCode(nextCode);
+        window.localStorage.setItem("ferientausch-invite-code", nextCode);
+      },
+      () => {
+        setInviteCode(window.localStorage.getItem("ferientausch-invite-code") || DEFAULT_INVITE_CODE);
+      },
+    );
   }, []);
 
   const currentProfile = useMemo(
@@ -521,6 +563,33 @@ function App() {
     });
   }
 
+  async function saveInviteCode(nextCode) {
+    const normalizedCode = String(nextCode ?? "").trim();
+    if (normalizedCode.length < 4) {
+      setFirebaseError("Der Einladungscode sollte mindestens 4 Zeichen lang sein.");
+      return;
+    }
+
+    try {
+      setFirebaseError("");
+      setInviteCode(normalizedCode);
+      window.localStorage.setItem("ferientausch-invite-code", normalizedCode);
+
+      if (firebaseEnabled) {
+        await saveRecord("settings", {
+          id: "public",
+          inviteCode: normalizedCode,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentProfile?.id ?? "",
+        });
+      }
+
+      setAppNotice("Einladungscode gespeichert.");
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
+  }
+
   async function handleAuthSubmit(event, form) {
     event.preventDefault();
     const formData = new FormData(form);
@@ -529,10 +598,10 @@ function App() {
     const firstName = String(formData.get("firstName") ?? "").trim();
     const lastName = String(formData.get("lastName") ?? "").trim();
     const city = String(formData.get("city") ?? "").trim();
-    const inviteCode = String(formData.get("inviteCode") ?? "").trim();
+    const submittedInviteCode = String(formData.get("inviteCode") ?? "").trim();
     const familyName = [firstName, lastName].filter(Boolean).join(" ");
 
-    if (authMode === "register" && inviteCode !== INVITE_CODE) {
+    if (authMode === "register" && submittedInviteCode !== inviteCode) {
       setFirebaseError("Der Einladungscode ist nicht korrekt.");
       return;
     }
@@ -660,11 +729,26 @@ function App() {
   async function saveAvailability(availability) {
     try {
       setFirebaseError("");
+      if (!isValidDateRange(availability.start, availability.end)) {
+        setFirebaseError("Bitte wähle einen gültigen Zeitraum aus.");
+        return;
+      }
+
       const home = state.homes.find((entry) => entry.id === availability.homeId);
+      if (!home) {
+        setFirebaseError("Bitte wähle eine Unterkunft aus.");
+        return;
+      }
+
       const normalized = {
         ...availability,
         ownerId: home?.ownerId ?? currentProfile.id,
       };
+
+      if (overlapsExistingRange(normalized, state.availabilities)) {
+        setFirebaseError("Dieser freie Zeitraum überschneidet sich mit einem bestehenden Zeitraum.");
+        return;
+      }
 
       await saveRecord("availabilities", normalized);
       updateState((current) => {
@@ -703,8 +787,32 @@ function App() {
         return;
       }
 
+      if (!isValidDateRange(draft.start, draft.end)) {
+        setFirebaseError("Bitte wähle einen gültigen Reisezeitraum aus.");
+        return;
+      }
+
+      const guests = Number(draft.guests);
+      if (!Number.isFinite(guests) || guests < 1 || guests > Number(targetHome.maxGuests)) {
+        setFirebaseError(`Bitte wähle eine Personenanzahl zwischen 1 und ${targetHome.maxGuests}.`);
+        return;
+      }
+
       if (!isRangeBookable(draft.homeId, draft.start, draft.end, state.availabilities, acceptedBookings)) {
         setFirebaseError("Dieser Zeitraum ist nicht mehr verfügbar. Bitte wähle freie Tage aus.");
+        return;
+      }
+
+      const hasDuplicatePendingRequest = state.requests.some(
+        (request) =>
+          request.fromUserId === currentProfile.id &&
+          request.homeId === draft.homeId &&
+          request.status === "pending" &&
+          rangesOverlap(request, draft),
+      );
+
+      if (hasDuplicatePendingRequest) {
+        setFirebaseError("Für diesen Zeitraum gibt es bereits eine offene Anfrage von dir.");
         return;
       }
 
@@ -715,7 +823,7 @@ function App() {
         homeId: draft.homeId,
         start: draft.start,
         end: draft.end,
-        guests: Number(draft.guests),
+        guests,
         status: "pending",
         messages: [
           {
@@ -822,6 +930,25 @@ function App() {
       }
 
       const nextRequest = { ...existing, ...normalized };
+      const targetHome = state.homes.find((home) => home.id === nextRequest.homeId);
+      if (!targetHome) {
+        setFirebaseError("Diese Unterkunft wurde nicht gefunden.");
+        return;
+      }
+
+      if (!isValidDateRange(nextRequest.start, nextRequest.end)) {
+        setFirebaseError("Bitte wähle einen gültigen Reisezeitraum aus.");
+        return;
+      }
+
+      if (
+        !Number.isFinite(nextRequest.guests) ||
+        nextRequest.guests < 1 ||
+        nextRequest.guests > Number(targetHome.maxGuests)
+      ) {
+        setFirebaseError(`Bitte wähle eine Personenanzahl zwischen 1 und ${targetHome.maxGuests}.`);
+        return;
+      }
 
       if (
         nextRequest.status === "accepted" &&
@@ -930,7 +1057,13 @@ function App() {
 
   async function toggleProfileApproval(profileId) {
     const profile = state.profiles.find((entry) => entry.id === profileId);
-    const next = { ...profile, approved: !isProfileApproved(profile) };
+    const approving = !isProfileApproved(profile);
+    const next = {
+      ...profile,
+      approved: approving,
+      approvedAt: approving ? new Date().toISOString() : "",
+      approvedBy: approving ? currentProfile.id : "",
+    };
     await saveProfile(next);
   }
 
@@ -1022,7 +1155,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f3ee] text-[#24313a]">
+    <div className="min-h-screen bg-[#f5f3ee] pb-20 text-[#24313a] md:pb-0">
       <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-white/95 shadow-[0_10px_30px_rgba(36,49,58,0.06)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
@@ -1071,6 +1204,7 @@ function App() {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
         {appNotice && <AppNoticeBanner message={appNotice} onDismiss={() => setAppNotice("")} />}
         {firebaseError && <FirebaseErrorBanner message={firebaseError} onDismiss={() => setFirebaseError("")} />}
+        <ViewErrorBoundary resetKey={activeTab}>
         {activeTab === "dashboard" && (
           <DashboardView
             currentProfile={currentProfile}
@@ -1154,14 +1288,39 @@ function App() {
             onDeleteRequest={deleteRequest}
             adminSection={adminSection}
             setAdminSection={setAdminSection}
+            inviteCode={inviteCode}
+            onSaveInviteCode={saveInviteCode}
           />
         )}
+        </ViewErrorBoundary>
       </main>
       <footer className="px-4 pb-5 text-center sm:px-6">
         <span className="inline-flex rounded-lg bg-white/55 px-3 py-1 text-xs font-semibold text-[#8a948d]">
           {firebaseEnabled ? "Firebase aktiv" : "Demo-Modus"}
         </span>
       </footer>
+
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-[#ded8cb] bg-white/96 px-2 py-2 shadow-[0_-10px_30px_rgba(36,49,58,0.08)] backdrop-blur md:hidden">
+        {tabs
+          .filter((tab) => ["dashboard", "discover", "calendar", "requests", "profile"].includes(tab.id))
+          .map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                className={`grid min-h-12 place-items-center rounded-lg px-1 text-[11px] font-bold ${
+                  active ? "bg-[#24313a] text-white" : "text-[#4f5d55]"
+                }`}
+                onClick={() => setActiveTab(tab.id)}
+                type="button"
+              >
+                <Icon size={18} />
+                <span className="mt-1 truncate">{tab.label}</span>
+              </button>
+            );
+          })}
+      </nav>
 
       {requestDraft && (
         <RequestPanel
@@ -1319,6 +1478,40 @@ function AppNoticeBanner({ message, onDismiss }) {
       </button>
     </div>
   );
+}
+
+class ViewErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error("FerienTausch view error", error);
+  }
+
+  componentDidUpdate(previousProps) {
+    if (previousProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <EmptyState
+          title="Ansicht konnte nicht geladen werden"
+          text="Bitte wechsle kurz den Tab oder lade die Seite neu. Die restliche App bleibt nutzbar."
+        />
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function DashboardView({
@@ -1689,6 +1882,20 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
     setCalendarMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
   }
 
+  function selectCalendarDay(day, status) {
+    if (!selectedCalendarHomeId || !day.inMonth) {
+      return;
+    }
+
+    setForm({
+      ...form,
+      homeId: selectedCalendarHomeId,
+      start: day.iso,
+      end: day.iso,
+      title: status === "booked" ? "Gebuchter Tag" : "Freier Tag",
+    });
+  }
+
   return (
     <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
       <section className="rounded-lg bg-white p-4 shadow-soft">
@@ -1709,7 +1916,7 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
           </div>
           <button
             className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white disabled:opacity-50"
-            disabled={!form.homeId || !form.start || !form.end}
+            disabled={!form.homeId || !isValidDateRange(form.start, form.end)}
             onClick={() => {
               onSave(form);
               setForm({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
@@ -1746,13 +1953,15 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
                     ? "bg-[#dcedd8] text-[#255c37]"
                     : "bg-white text-[#9aa39d]";
               return (
-                <div
+                <button
                   key={day.iso}
-                  className={`grid aspect-square place-items-center rounded-lg text-xs font-bold ${className} ${day.inMonth ? "" : "opacity-45"}`}
+                  className={`grid aspect-square place-items-center rounded-lg text-xs font-bold transition hover:ring-2 hover:ring-[#2d6a62]/30 ${className} ${day.inMonth ? "cursor-pointer" : "cursor-default opacity-45"}`}
                   title={status === "booked" ? "Gebucht" : status === "free" ? "Frei" : "Nicht freigegeben"}
+                  type="button"
+                  onClick={() => selectCalendarDay(day, status)}
                 >
                   {day.label}
-                </div>
+                </button>
               );
             })}
           </div>
@@ -1968,6 +2177,8 @@ function AdminView({
   onDeleteRequest,
   adminSection,
   setAdminSection,
+  inviteCode,
+  onSaveInviteCode,
 }) {
   const [externalHome, setExternalHome] = useState({
     ...blankHouse,
@@ -1976,6 +2187,7 @@ function AdminView({
     managedBy: currentProfile.id,
     isExternal: true,
   });
+  const [inviteDraft, setInviteDraft] = useState(inviteCode);
   const adminTabs = [
     { id: "overview", label: "Übersicht" },
     { id: "members", label: "Mitglieder" },
@@ -1986,6 +2198,10 @@ function AdminView({
   ];
   const bookings = mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]);
   const pendingProfiles = state.profiles.filter((profile) => !isProfileApproved(profile));
+
+  useEffect(() => {
+    setInviteDraft(inviteCode);
+  }, [inviteCode]);
 
   async function updateRegistrationNotificationPreference(enabled) {
     if (enabled) {
@@ -2051,6 +2267,14 @@ function AdminView({
               <div>
                 <strong>{getProfileName(profile)}</strong>
                 <p className="text-sm text-[#66756d]">{profile.email} · {profile.city}</p>
+                {profile.approvedAt && (
+                  <p className="mt-1 text-xs font-semibold text-[#66756d]">
+                    Freigegeben am {formatDateTime(profile.approvedAt)}
+                    {profile.approvedBy
+                      ? ` durch ${getProfileName(state.profiles.find((entry) => entry.id === profile.approvedBy))}`
+                      : ""}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
                 <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onToggleApproval(profile.id)}>
@@ -2126,15 +2350,34 @@ function AdminView({
       )}
       {adminSection === "overview" && (
         <section className="rounded-lg bg-white p-4 shadow-soft">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#edf1e8] text-[#255c37]">
-              <KeyRound size={18} />
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#edf1e8] text-[#255c37]">
+                <KeyRound size={18} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Einladungscode</h2>
+                <p className="mt-1 text-sm text-[#66756d]">
+                  Neue Registrierungen nutzen diesen Code sofort. Die Admin-Freigabe bleibt zusätzlich aktiv.
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-xl font-bold">Einladungscode</h2>
-              <p className="mt-1 text-sm text-[#66756d]">
-                Aktueller Code: <strong>{INVITE_CODE}</strong>. In Vercel kann er über <code>VITE_INVITE_CODE</code> geändert werden.
-              </p>
+            <div className="flex w-full flex-col gap-2 sm:max-w-sm">
+              <label className="text-sm font-semibold">
+                Aktueller Code
+                <input
+                  className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] px-3"
+                  value={inviteDraft}
+                  onChange={(event) => setInviteDraft(event.target.value)}
+                />
+              </label>
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#2d6a62] px-3 text-sm font-semibold text-white"
+                onClick={() => onSaveInviteCode(inviteDraft)}
+                type="button"
+              >
+                <Check size={17} /> Code speichern
+              </button>
             </div>
           </div>
         </section>
@@ -2433,14 +2676,32 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
               <h3 className="text-lg font-bold">Freie Zeiträume</h3>
               <div className="mt-3 space-y-2">
                 {bookableAvailabilities.map((availability) => (
-                  <DateRow
-                    key={availability.id}
-                    title={availability.title}
-                    subtitle={home.title}
-                    start={availability.start}
-                    end={availability.end}
-                    status="free"
-                  />
+                  <div key={availability.id} className="rounded-lg border border-[#dfe8dc] bg-[#f8faf5] p-3">
+                    <DateRow
+                      title={availability.title}
+                      subtitle={home.title}
+                      start={availability.start}
+                      end={availability.end}
+                      status="free"
+                    />
+                    {!disabled && (
+                      <button
+                        className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-3 text-sm font-semibold text-white"
+                        onClick={() =>
+                          onRequest({
+                            homeId: home.id,
+                            start: availability.start,
+                            end: availability.end,
+                            guests: Math.min(4, home.maxGuests),
+                            message: "",
+                          })
+                        }
+                        type="button"
+                      >
+                        <Send size={16} /> Diesen Zeitraum anfragen
+                      </button>
+                    )}
+                  </div>
                 ))}
                 {!bookableAvailabilities.length && <EmptyState title="Nicht verfügbar" text="Für dieses Haus sind aktuell keine freien Tage übrig." />}
               </div>
@@ -2738,6 +2999,9 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
 function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit }) {
   const [form, setForm] = useState(draft);
   const datesEntered = Boolean(form.homeId && form.start && form.end);
+  const validDates = !datesEntered || isValidDateRange(form.start, form.end);
+  const guests = Number(form.guests);
+  const validGuests = Number.isFinite(guests) && guests >= 1 && guests <= Number(home?.maxGuests ?? guests);
   const bookable = !datesEntered || isRangeBookable(form.homeId, form.start, form.end, availabilities, bookings);
 
   return (
@@ -2763,11 +3027,21 @@ function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit
         </label>
         <button
           className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 font-semibold text-white disabled:opacity-50"
-          disabled={!form.start || !form.end || !form.guests || !bookable}
+          disabled={!form.start || !form.end || !form.guests || !validDates || !validGuests || !bookable}
           onClick={() => onSubmit(form)}
         >
           <Send size={18} /> Anfrage senden
         </button>
+        {!validDates && (
+          <p className="mt-3 rounded-lg border border-[#f0d6a8] bg-[#fff5df] px-3 py-2 text-sm font-semibold text-[#75511a]">
+            Das Enddatum muss am oder nach dem Startdatum liegen.
+          </p>
+        )}
+        {!validGuests && (
+          <p className="mt-3 rounded-lg border border-[#f0d6a8] bg-[#fff5df] px-3 py-2 text-sm font-semibold text-[#75511a]">
+            Bitte wähle 1 bis {home?.maxGuests ?? 1} Personen.
+          </p>
+        )}
         {!bookable && (
           <p className="mt-3 rounded-lg border border-[#f0d6a8] bg-[#fff5df] px-3 py-2 text-sm font-semibold text-[#75511a]">
             Dieser Zeitraum ist bereits gebucht oder nicht als frei eingetragen.
