@@ -18,6 +18,7 @@ import {
   MapPin,
   Pencil,
   Plus,
+  ClipboardCheck,
   Search,
   Send,
   ShieldCheck,
@@ -55,6 +56,7 @@ import {
   loadLocalState,
   patchRecord,
   removeRecord,
+  removeStorageFile,
   saveLocalState,
   saveRecord,
   subscribeCollection,
@@ -111,6 +113,7 @@ const emptyState = {
   availabilities: [],
   requests: [],
   bookings: [],
+  auditLogs: [],
 };
 
 function getProfileName(profile) {
@@ -214,6 +217,56 @@ function isValidDateRange(start, end) {
 
 function overlapsExistingRange(range, ranges = []) {
   return ranges.some((entry) => entry.id !== range.id && entry.homeId === range.homeId && rangesOverlap(entry, range));
+}
+
+function getHomeQualityIssues(home) {
+  const issues = [];
+  if (!home.title) issues.push("Titel fehlt");
+  if (!home.city) issues.push("Ort fehlt");
+  if (!home.address) issues.push("Adresse fehlt");
+  if (!home.description || home.description.length < 40) issues.push("Beschreibung zu kurz");
+  if (!getHomePhotos(home).length) issues.push("Keine Bilder");
+  if ((home.amenities ?? []).length < 5) issues.push("Wenig Ausstattung");
+  if (!Number(home.maxGuests) || !Number(home.bedrooms) || !Number(home.bathrooms)) issues.push("Basisdaten unvollständig");
+  return issues;
+}
+
+function getProfileQualityIssues(profile) {
+  const issues = [];
+  if (!profile.firstName) issues.push("Vorname fehlt");
+  if (!profile.lastName) issues.push("Nachname fehlt");
+  if (!profile.city) issues.push("Wohnort fehlt");
+  if (!profile.email) issues.push("E-Mail fehlt");
+  if (!profile.description || profile.description.length < 25) issues.push("Beschreibung zu kurz");
+  if (!profile.photoUrl) issues.push("Profilbild fehlt");
+  return issues;
+}
+
+function getCompletionScore(issues, totalChecks) {
+  return Math.max(0, Math.round(((totalChecks - issues.length) / totalChecks) * 100));
+}
+
+function mailtoLink(to, subject, body) {
+  return `mailto:${encodeURIComponent(to || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function requestEmailDraft(request, home, from, to) {
+  const recipient = to?.email || from?.email || "";
+  const subject = `FerienTausch: Anfrage für ${home?.title ?? "eine Unterkunft"}`;
+  const body = [
+    `Hallo ${to ? getProfileName(to) : "zusammen"},`,
+    "",
+    `${getProfileName(from)} hat eine Tauschanfrage für ${home?.title ?? "deine Unterkunft"} gestellt.`,
+    `Zeitraum: ${formatDateRange(request.start, request.end)}`,
+    `Personen: ${request.guests}`,
+    "",
+    "Bitte prüfe die Anfrage in FerienTausch.",
+  ].join("\n");
+  return mailtoLink(recipient, subject, body);
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function csvValue(value) {
@@ -333,6 +386,10 @@ function App() {
   const [selectedHomeId, setSelectedHomeId] = useState(null);
   const [query, setQuery] = useState("");
   const [minGuests, setMinGuests] = useState("");
+  const [minBedrooms, setMinBedrooms] = useState("");
+  const [regionFilter, setRegionFilter] = useState("");
+  const [holidayFilter, setHolidayFilter] = useState("");
+  const [quickFilters, setQuickFilters] = useState([]);
   const [travelStart, setTravelStart] = useState("");
   const [travelEnd, setTravelEnd] = useState("");
   const [selectedAmenities, setSelectedAmenities] = useState([]);
@@ -431,10 +488,20 @@ function App() {
       subscribeCollection("bookings", (bookings) => setState((current) => ({ ...current, bookings })), handleError),
     ];
 
+    if (currentProfile?.isAdmin) {
+      unsubscribers.push(
+        subscribeCollection(
+          "auditLogs",
+          (auditLogs) => setState((current) => ({ ...current, auditLogs })),
+          handleError,
+        ),
+      );
+    }
+
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [currentUserId]);
+  }, [currentProfile?.isAdmin, currentUserId]);
 
   useEffect(() => {
     if (!firebaseEnabled || !currentUserId) {
@@ -527,7 +594,21 @@ function App() {
         .toLowerCase()
         .includes(query.toLowerCase());
       const guestMatch = !minGuests || Number(home.maxGuests) >= Number(minGuests);
+      const bedroomMatch = !minBedrooms || Number(home.bedrooms) >= Number(minBedrooms);
+      const regionMatch =
+        !regionFilter ||
+        `${home.city} ${home.address}`.toLowerCase().includes(regionFilter.toLowerCase());
       const amenitiesMatch = selectedAmenities.every((amenity) => (home.amenities ?? []).includes(amenity));
+      const quickMatch = quickFilters.every((filter) => (home.amenities ?? []).includes(filter));
+      const holidayMatch =
+        !holidayFilter ||
+        state.availabilities
+          .filter((availability) => availability.homeId === home.id)
+          .some((availability) =>
+            `${availability.title} ${availability.start} ${availability.end}`
+              .toLowerCase()
+              .includes(holidayFilter.toLowerCase()),
+          );
       const dateMatch =
         !travelStart ||
         !travelEnd ||
@@ -538,14 +619,28 @@ function App() {
         (availabilityMode === "available" && (mode === "free" || mode === "partial")) ||
         availabilityMode === mode;
 
-      return textMatch && guestMatch && amenitiesMatch && dateMatch && availabilityMatch;
+      return (
+        textMatch &&
+        guestMatch &&
+        bedroomMatch &&
+        regionMatch &&
+        amenitiesMatch &&
+        quickMatch &&
+        holidayMatch &&
+        dateMatch &&
+        availabilityMatch
+      );
     });
   }, [
     acceptedBookings,
     availabilityMode,
     bookableAvailabilities,
+    holidayFilter,
+    minBedrooms,
     minGuests,
     query,
+    quickFilters,
+    regionFilter,
     selectedAmenities,
     state.availabilities,
     state.homes,
@@ -561,6 +656,32 @@ function App() {
       }
       return next;
     });
+  }
+
+  async function logAudit(action, targetType, targetId, details = "") {
+    if (!currentProfile) {
+      return;
+    }
+
+    const entry = {
+      id: createId("audit"),
+      actorId: currentProfile.id,
+      action,
+      targetType,
+      targetId,
+      details,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await saveRecord("auditLogs", entry);
+      updateState((current) => ({
+        ...current,
+        auditLogs: [entry, ...(current.auditLogs ?? [])].slice(0, 100),
+      }));
+    } catch {
+      // Audit logs should never block the user's actual action.
+    }
   }
 
   async function saveInviteCode(nextCode) {
@@ -585,6 +706,7 @@ function App() {
       }
 
       setAppNotice("Einladungscode gespeichert.");
+      await logAudit("Einladungscode geändert", "settings", "public");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -694,6 +816,8 @@ function App() {
   async function upsertHome(home) {
     try {
       setFirebaseError("");
+      const previousHome = state.homes.find((entry) => entry.id === home.id);
+      const previousPhotos = getHomePhotos(previousHome);
       const photos = getHomePhotos(home);
       const photoCaptions = getPhotoCaptions(home).slice(0, photos.length);
       const normalized = {
@@ -712,6 +836,11 @@ function App() {
       };
 
       await saveRecord("homes", normalized);
+      await Promise.all(
+        previousPhotos
+          .filter((photo) => !photos.includes(photo))
+          .map((photo) => removeStorageFile(photo).catch(() => null)),
+      );
       updateState((current) => {
         const exists = current.homes.some((entry) => entry.id === normalized.id);
         return {
@@ -721,6 +850,7 @@ function App() {
             : [...current.homes, normalized],
         };
       });
+      await logAudit(previousHome ? "Unterkunft geändert" : "Unterkunft erstellt", "home", normalized.id, normalized.title);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -760,6 +890,7 @@ function App() {
             : [...current.availabilities, normalized],
         };
       });
+      await logAudit("Freier Zeitraum gespeichert", "availability", normalized.id, normalized.title);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -773,6 +904,7 @@ function App() {
         ...current,
         availabilities: current.availabilities.filter((availability) => availability.id !== id),
       }));
+      await logAudit("Freier Zeitraum gelöscht", "availability", id);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -836,6 +968,7 @@ function App() {
 
       await saveRecord("exchangeRequests", request);
       updateState((current) => ({ ...current, requests: [...current.requests, request] }));
+      await logAudit("Tauschanfrage erstellt", "request", request.id, targetHome.title);
       setRequestDraft(null);
       setActiveTab("requests");
     } catch (error) {
@@ -911,6 +1044,7 @@ function App() {
             ? mergeBookings([...(current.bookings ?? []).filter((booking) => booking.requestId !== id), bookingFromRequest(nextRequest)])
             : (current.bookings ?? []).filter((booking) => booking.requestId !== id),
       }));
+      await logAudit(`Tauschanfrage ${statusLabels[status] ?? status}`, "request", id);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -988,6 +1122,7 @@ function App() {
             ? mergeBookings([...(current.bookings ?? []).filter((booking) => booking.requestId !== id), bookingFromRequest(nextRequest)])
             : (current.bookings ?? []).filter((booking) => booking.requestId !== id),
       }));
+      await logAudit("Tauschanfrage bearbeitet", "request", id);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1009,6 +1144,7 @@ function App() {
           ? (current.bookings ?? []).filter((booking) => booking.requestId !== id)
           : current.bookings ?? [],
       }));
+      await logAudit("Tauschanfrage gelöscht", "request", id);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1031,6 +1167,7 @@ function App() {
         ...current,
         requests: current.requests.map((entry) => (entry.id === id ? { ...entry, messages } : entry)),
       }));
+      await logAudit("Nachricht geschrieben", "request", id);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1039,11 +1176,16 @@ function App() {
   async function saveProfile(profile) {
     try {
       setFirebaseError("");
+      const previousProfile = state.profiles.find((entry) => entry.id === profile.id);
       await saveRecord("profiles", profile);
+      if (previousProfile?.photoUrl && previousProfile.photoUrl !== profile.photoUrl) {
+        await removeStorageFile(previousProfile.photoUrl).catch(() => null);
+      }
       updateState((current) => ({
         ...current,
         profiles: current.profiles.map((entry) => (entry.id === profile.id ? profile : entry)),
       }));
+      await logAudit("Profil gespeichert", "profile", profile.id, getProfileName(profile));
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1070,12 +1212,20 @@ function App() {
   async function deleteHome(id) {
     try {
       setFirebaseError("");
+      const existingHome = state.homes.find((home) => home.id === id);
       await removeRecord("homes", id);
+      await Promise.all(
+        state.availabilities
+          .filter((availability) => availability.homeId === id)
+          .map((availability) => removeRecord("availabilities", availability.id).catch(() => null)),
+      );
+      await Promise.all(getHomePhotos(existingHome).map((photo) => removeStorageFile(photo).catch(() => null)));
       updateState((current) => ({
         ...current,
         homes: current.homes.filter((home) => home.id !== id),
         availabilities: current.availabilities.filter((availability) => availability.homeId !== id),
       }));
+      await logAudit("Unterkunft gelöscht", "home", id, existingHome?.title ?? "");
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1084,12 +1234,28 @@ function App() {
   async function deleteProfile(id) {
     try {
       setFirebaseError("");
+      const ownedProfileHomes = state.homes.filter((home) => home.ownerId === id);
       await removeRecord("profiles", id);
+      await Promise.all(ownedProfileHomes.map((home) => removeRecord("homes", home.id).catch(() => null)));
+      await Promise.all(
+        state.availabilities
+          .filter((availability) => ownedProfileHomes.some((home) => home.id === availability.homeId))
+          .map((availability) => removeRecord("availabilities", availability.id).catch(() => null)),
+      );
+      await Promise.all(
+        ownedProfileHomes
+          .flatMap((home) => getHomePhotos(home))
+          .map((photo) => removeStorageFile(photo).catch(() => null)),
+      );
       updateState((current) => ({
         ...current,
         profiles: current.profiles.filter((profile) => profile.id !== id),
         homes: current.homes.filter((home) => home.ownerId !== id),
+        availabilities: current.availabilities.filter(
+          (availability) => !ownedProfileHomes.some((home) => home.id === availability.homeId),
+        ),
       }));
+      await logAudit("Profil gelöscht", "profile", id);
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1231,6 +1397,14 @@ function App() {
             setQuery={setQuery}
             minGuests={minGuests}
             setMinGuests={setMinGuests}
+            minBedrooms={minBedrooms}
+            setMinBedrooms={setMinBedrooms}
+            regionFilter={regionFilter}
+            setRegionFilter={setRegionFilter}
+            holidayFilter={holidayFilter}
+            setHolidayFilter={setHolidayFilter}
+            quickFilters={quickFilters}
+            setQuickFilters={setQuickFilters}
             selectedAmenities={selectedAmenities}
             setSelectedAmenities={setSelectedAmenities}
             availabilityMode={availabilityMode}
@@ -1729,6 +1903,14 @@ function DiscoverView({
   setQuery,
   minGuests,
   setMinGuests,
+  minBedrooms,
+  setMinBedrooms,
+  regionFilter,
+  setRegionFilter,
+  holidayFilter,
+  setHolidayFilter,
+  quickFilters,
+  setQuickFilters,
   selectedAmenities,
   setSelectedAmenities,
   availabilityMode,
@@ -1746,11 +1928,20 @@ function DiscoverView({
     );
   }
 
+  function toggleQuickFilter(filter) {
+    setQuickFilters((current) =>
+      current.includes(filter) ? current.filter((entry) => entry !== filter) : [...current, filter],
+    );
+  }
+
   return (
     <div className="space-y-5">
       <Toolbar>
         <SearchField value={query} onChange={setQuery} placeholder="Ort, Adresse oder Haus suchen" />
         <FieldCompact label="Mind. Gäste" type="number" value={minGuests} onChange={setMinGuests} />
+        <FieldCompact label="Schlafzimmer" type="number" value={minBedrooms} onChange={setMinBedrooms} />
+        <FieldCompact label="Region" value={regionFilter} onChange={setRegionFilter} />
+        <FieldCompact label="Ferien/Zeitraum" value={holidayFilter} onChange={setHolidayFilter} />
         <FieldCompact label="Von" type="date" value={travelStart} onChange={setTravelStart} />
         <FieldCompact label="Bis" type="date" value={travelEnd} onChange={setTravelEnd} />
       </Toolbar>
@@ -1761,6 +1952,23 @@ function DiscoverView({
               <Filter size={15} /> Ausstattung
             </div>
             <div className="flex flex-wrap gap-2">
+              {["Haustiere erlaubt", "Barrierearm", "Kinderfreundlich", "Parkplatz"].map((filter) => {
+                const selected = quickFilters.includes(filter);
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={`h-9 rounded-lg px-3 text-sm font-semibold ${
+                      selected ? "bg-[#24313a] text-white" : "bg-white text-[#4f5d55] ring-1 ring-[#dce3d8]"
+                    }`}
+                    onClick={() => toggleQuickFilter(filter)}
+                  >
+                    {filter}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
               {discoverFilterAmenities.map((amenity) => {
                 const selected = selectedAmenities.includes(amenity);
                 return (
@@ -2092,6 +2300,8 @@ function ProfileView({ profile, onSave, onUploadPhoto }) {
   const [form, setForm] = useState(profile);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadNote, setUploadNote] = useState("");
+  const profileIssues = getProfileQualityIssues(form);
+  const profileScore = getCompletionScore(profileIssues, 6);
 
   useEffect(() => {
     setForm(profile);
@@ -2128,6 +2338,7 @@ function ProfileView({ profile, onSave, onUploadPhoto }) {
           <p className="mt-1 text-sm text-[#66756d]">{getProfileName(form)}</p>
         </div>
       </div>
+      <QualityMeter score={profileScore} issues={profileIssues} />
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <FieldControlled label="Vorname" value={form.firstName ?? ""} onChange={(firstName) => setForm({ ...form, firstName, familyName: [firstName, form.lastName].filter(Boolean).join(" ") })} />
         <FieldControlled label="Nachname" value={form.lastName ?? ""} onChange={(lastName) => setForm({ ...form, lastName, familyName: [form.firstName, lastName].filter(Boolean).join(" ") })} />
@@ -2190,14 +2401,71 @@ function AdminView({
   const [inviteDraft, setInviteDraft] = useState(inviteCode);
   const adminTabs = [
     { id: "overview", label: "Übersicht" },
+    { id: "tasks", label: "Aufgaben" },
     { id: "members", label: "Mitglieder" },
     { id: "homes", label: "Häuser" },
     { id: "requests", label: "Anfragen" },
     { id: "bookings", label: "Buchungen" },
+    { id: "audit", label: "Audit" },
     { id: "export", label: "Export" },
   ];
   const bookings = mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]);
   const pendingProfiles = state.profiles.filter((profile) => !isProfileApproved(profile));
+  const openRequests = state.requests.filter((request) => request.status === "pending");
+  const staleAvailabilities = state.availabilities.filter((availability) => availability.end < todayIso());
+  const homesWithoutAvailability = state.homes.filter(
+    (home) => !state.availabilities.some((availability) => availability.homeId === home.id && availability.end >= todayIso()),
+  );
+  const incompleteHomes = state.homes
+    .map((home) => ({ home, issues: getHomeQualityIssues(home) }))
+    .filter((entry) => entry.issues.length);
+  const incompleteProfiles = state.profiles
+    .map((profile) => ({ profile, issues: getProfileQualityIssues(profile) }))
+    .filter((entry) => entry.issues.length);
+  const adminTasks = [
+    ...pendingProfiles.map((profile) => ({
+      id: `profile-${profile.id}`,
+      title: `${getProfileName(profile)} freigeben`,
+      text: profile.email || "Neue Registrierung wartet auf Prüfung.",
+      action: "Mitglieder öffnen",
+      onClick: () => setAdminSection("members"),
+    })),
+    ...openRequests.map((request) => ({
+      id: `request-${request.id}`,
+      title: "Offene Tauschanfrage prüfen",
+      text: `${state.homes.find((home) => home.id === request.homeId)?.title ?? "Unterkunft"} · ${formatDateRange(request.start, request.end)}`,
+      action: "Anfragen öffnen",
+      onClick: () => setAdminSection("requests"),
+    })),
+    ...homesWithoutAvailability.map((home) => ({
+      id: `availability-${home.id}`,
+      title: `${home.title || "Unterkunft"} ohne aktive freie Zeiträume`,
+      text: home.city || "Bitte Verfügbarkeit prüfen.",
+      action: "Häuser öffnen",
+      onClick: () => setAdminSection("homes"),
+    })),
+    ...incompleteHomes.slice(0, 6).map(({ home, issues }) => ({
+      id: `quality-home-${home.id}`,
+      title: `${home.title || "Unterkunft"} vervollständigen`,
+      text: issues.join(", "),
+      action: "Häuser öffnen",
+      onClick: () => setAdminSection("homes"),
+    })),
+    ...incompleteProfiles.slice(0, 6).map(({ profile, issues }) => ({
+      id: `quality-profile-${profile.id}`,
+      title: `${getProfileName(profile)} Profil ergänzen`,
+      text: issues.join(", "),
+      action: "Mitglieder öffnen",
+      onClick: () => setAdminSection("members"),
+    })),
+    ...staleAvailabilities.slice(0, 6).map((availability) => ({
+      id: `stale-${availability.id}`,
+      title: "Abgelaufenen Zeitraum prüfen",
+      text: `${availability.title || "Zeitraum"} · ${formatDateRange(availability.start, availability.end)}`,
+      action: "Buchungen öffnen",
+      onClick: () => setAdminSection("bookings"),
+    })),
+  ];
 
   useEffect(() => {
     setInviteDraft(inviteCode);
@@ -2216,7 +2484,7 @@ function AdminView({
       <div className="grid gap-3 md:grid-cols-3">
         <Metric label="Unterkünfte" value={state.homes.length} />
         <Metric label="Mitglieder" value={state.profiles.length} />
-        <Metric label="Tauschanfragen" value={state.requests.length} />
+        <Metric label="Offene Aufgaben" value={adminTasks.length} />
       </div>
       <div className="flex gap-2 overflow-x-auto rounded-lg bg-white p-2 shadow-soft">
         {adminTabs.map((tab) => (
@@ -2232,6 +2500,8 @@ function AdminView({
           </button>
         ))}
       </div>
+      {adminSection === "overview" && <AdminTaskPanel tasks={adminTasks.slice(0, 6)} compact onOpenAll={() => setAdminSection("tasks")} />}
+      {adminSection === "tasks" && <AdminTaskPanel tasks={adminTasks} />}
       {adminSection === "overview" && (
       <section className="rounded-lg bg-white p-4 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2382,6 +2652,22 @@ function AdminView({
           </div>
         </section>
       )}
+      {adminSection === "overview" && (
+        <section className="rounded-lg bg-white p-4 shadow-soft">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-[#edf1e8] text-[#255c37]">
+              <ShieldCheck size={18} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Sicherheit & E-Mail</h2>
+              <p className="mt-1 text-sm leading-6 text-[#66756d]">
+                App Check sollte in der Firebase Console aktiviert werden. E-Mail-Buttons erzeugen sofort Entwürfe;
+                echte automatische E-Mails benötigen später Cloud Functions oder einen Maildienst.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
       {adminSection === "requests" && (
         <section className="grid gap-4">
           {state.requests.map((request) => (
@@ -2406,6 +2692,7 @@ function AdminView({
       {adminSection === "bookings" && (
         <section className="rounded-lg bg-white p-4 shadow-soft">
           <h2 className="text-xl font-bold">Alle Buchungen</h2>
+          <AdminBookingCalendar homes={state.homes} availabilities={state.availabilities} bookings={bookings} />
           <div className="mt-3 grid gap-3">
             {bookings.map((booking) => (
               <DateRow
@@ -2418,6 +2705,28 @@ function AdminView({
               />
             ))}
             {!bookings.length && <EmptyState title="Keine Buchungen" text="Angenommene Anfragen erscheinen hier automatisch." />}
+          </div>
+        </section>
+      )}
+      {adminSection === "audit" && (
+        <section className="rounded-lg bg-white p-4 shadow-soft">
+          <h2 className="text-xl font-bold">Audit-Log</h2>
+          <div className="mt-3 grid gap-2">
+            {[...(state.auditLogs ?? [])]
+              .sort((first, second) => String(second.createdAt).localeCompare(String(first.createdAt)))
+              .slice(0, 80)
+              .map((entry) => (
+                <div key={entry.id} className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <strong>{entry.action}</strong>
+                    <span className="text-xs font-semibold text-[#66756d]">{formatDateTime(entry.createdAt)}</span>
+                  </div>
+                  <p className="mt-1 text-[#66756d]">
+                    {getProfileName(state.profiles.find((profile) => profile.id === entry.actorId))} · {entry.targetType} · {entry.details || entry.targetId}
+                  </p>
+                </div>
+              ))}
+            {!(state.auditLogs ?? []).length && <EmptyState title="Noch kein Audit-Log" text="Neue Änderungen werden hier für Admins protokolliert." />}
           </div>
         </section>
       )}
@@ -2816,10 +3125,13 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
     : 0;
   const coverPhoto = photos[coverPhotoIndex];
   const coverCaption = getPhotoCaption(value, coverPhotoIndex);
+  const homeIssues = getHomeQualityIssues(value);
+  const homeScore = getCompletionScore(homeIssues, 7);
 
   return (
     <section className={compact ? "" : "rounded-lg bg-white p-5 shadow-soft"}>
       {!compact && <h2 className="mb-4 text-xl font-bold">Unterkunft bearbeiten</h2>}
+      <QualityMeter score={homeScore} issues={homeIssues} />
       <div className="grid gap-3 sm:grid-cols-2">
         <FieldControlled label="Titel" value={value.title} onChange={(title) => updateField("title", title)} />
         <FieldControlled label="Standort/Stadt" value={value.city} onChange={(city) => updateField("city", city)} />
@@ -3003,6 +3315,9 @@ function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit
   const guests = Number(form.guests);
   const validGuests = Number.isFinite(guests) && guests >= 1 && guests <= Number(home?.maxGuests ?? guests);
   const bookable = !datesEntered || isRangeBookable(form.homeId, form.start, form.end, availabilities, bookings);
+  const alternativeRanges = home
+    ? getBookableAvailabilities(availabilities, bookings).filter((availability) => availability.homeId === home.id)
+    : [];
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/35 p-3 sm:place-items-center">
@@ -3043,9 +3358,23 @@ function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit
           </p>
         )}
         {!bookable && (
-          <p className="mt-3 rounded-lg border border-[#f0d6a8] bg-[#fff5df] px-3 py-2 text-sm font-semibold text-[#75511a]">
-            Dieser Zeitraum ist bereits gebucht oder nicht als frei eingetragen.
-          </p>
+          <div className="mt-3 rounded-lg border border-[#f0d6a8] bg-[#fff5df] px-3 py-2 text-sm font-semibold text-[#75511a]">
+            <p>Dieser Zeitraum ist bereits gebucht oder nicht als frei eingetragen.</p>
+            {alternativeRanges.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {alternativeRanges.slice(0, 3).map((availability) => (
+                  <button
+                    key={availability.id}
+                    className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-[#24313a]"
+                    onClick={() => setForm({ ...form, start: availability.start, end: availability.end })}
+                    type="button"
+                  >
+                    {formatDateRange(availability.start, availability.end)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </section>
     </div>
@@ -3067,6 +3396,7 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
   const incoming = request.toUserId === currentProfile.id;
   const canAdminEdit = currentProfile.isAdmin;
   const canDelete = currentProfile.isAdmin || (request.fromUserId === currentProfile.id && request.status !== "pending");
+  const emailHref = requestEmailDraft(request, home, from, to);
 
   useEffect(() => {
     if (!editing) {
@@ -3103,6 +3433,9 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <a className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" href={emailHref}>
+            <Mail size={17} /> E-Mail
+          </a>
           {canAdminEdit && (
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => setEditing((current) => !current)}>
               <Pencil size={17} /> {editing ? "Schliessen" : "Bearbeiten"}
@@ -3252,7 +3585,7 @@ function SearchField({ value, onChange, placeholder }) {
 }
 
 function Toolbar({ children }) {
-  return <div className="flex flex-col gap-3 rounded-lg bg-white p-3 shadow-soft lg:flex-row lg:items-end">{children}</div>;
+  return <div className="flex flex-col gap-3 rounded-lg bg-white p-3 shadow-soft lg:flex-row lg:flex-wrap lg:items-end">{children}</div>;
 }
 
 function IconButton({ label, children, onClick }) {
@@ -3285,6 +3618,91 @@ function Fact({ icon: Icon, label }) {
     <div className="flex min-h-10 items-center justify-center gap-1 rounded-lg bg-[#f6f8f3] px-2 text-center">
       <Icon size={16} />
       <span>{label}</span>
+    </div>
+  );
+}
+
+function AdminTaskPanel({ tasks, compact = false, onOpenAll }) {
+  return (
+    <section className="rounded-lg bg-white p-4 shadow-soft">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-xl font-bold">Offene Aufgaben</h2>
+          <p className="mt-1 text-sm text-[#66756d]">Neue Nutzer, offene Anfragen, fehlende Daten und abgelaufene Zeiträume.</p>
+        </div>
+        {compact && tasks.length > 0 && (
+          <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={onOpenAll} type="button">
+            <ClipboardCheck size={17} /> Alle anzeigen
+          </button>
+        )}
+      </div>
+      <div className="mt-3 grid gap-2">
+        {tasks.map((task) => (
+          <div key={task.id} className="flex flex-col gap-3 rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <strong>{task.title}</strong>
+              <p className="mt-1 text-sm text-[#66756d]">{task.text}</p>
+            </div>
+            <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 text-sm font-semibold text-[#24313a] ring-1 ring-[#dce3d8]" onClick={task.onClick} type="button">
+              {task.action}
+            </button>
+          </div>
+        ))}
+        {!tasks.length && <EmptyState title="Alles erledigt" text="Aktuell gibt es keine automatisch erkannten Admin-Aufgaben." />}
+      </div>
+    </section>
+  );
+}
+
+function AdminBookingCalendar({ homes, availabilities, bookings }) {
+  const rows = homes.map((home) => {
+    const homeAvailabilities = availabilities.filter((availability) => availability.homeId === home.id && availability.end >= todayIso());
+    const homeBookings = bookings.filter((booking) => booking.homeId === home.id);
+    return { home, homeAvailabilities, homeBookings };
+  });
+
+  return (
+    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+      {rows.map(({ home, homeAvailabilities, homeBookings }) => (
+        <div key={home.id} className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <strong>{home.title}</strong>
+            <Pill tone={homeBookings.length ? "amber" : homeAvailabilities.length ? "green" : "red"}>
+              {homeBookings.length ? `${homeBookings.length} Buchung(en)` : homeAvailabilities.length ? "Frei" : "Keine Freigabe"}
+            </Pill>
+          </div>
+          <div className="mt-3 space-y-2">
+            {homeBookings.slice(0, 3).map((booking) => (
+              <DateRow key={booking.id} title="Gebucht" subtitle={home.title} start={booking.start} end={booking.end} status="booked" />
+            ))}
+            {!homeBookings.length &&
+              homeAvailabilities.slice(0, 2).map((availability) => (
+                <DateRow key={availability.id} title={availability.title || "Frei"} subtitle={home.title} start={availability.start} end={availability.end} status="free" />
+              ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function QualityMeter({ score, issues }) {
+  const tone = score >= 80 ? "bg-[#2d6a62]" : score >= 55 ? "bg-[#d97706]" : "bg-[#9f3f34]";
+
+  return (
+    <div className="mt-4 rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <strong className="text-sm">Vollständigkeit</strong>
+        <span className="text-sm font-bold text-[#4f5d55]">{score}%</span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+        <div className={`h-full ${tone}`} style={{ width: `${score}%` }} />
+      </div>
+      {issues.length > 0 && (
+        <p className="mt-2 text-xs font-semibold text-[#66756d]">
+          Offen: {issues.join(", ")}
+        </p>
+      )}
     </div>
   );
 }

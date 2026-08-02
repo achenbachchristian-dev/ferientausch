@@ -39,6 +39,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     match /homes/{homeId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && (request.resource.data.ownerId == request.auth.uid || isAdmin());

@@ -20,6 +20,7 @@ import {
   where,
 } from "firebase/firestore";
 import {
+  deleteObject,
   getDownloadURL,
   getStorage,
   ref as storageRef,
@@ -65,6 +66,7 @@ export {
   addDoc,
   collection,
   createUserWithEmailAndPassword,
+  deleteObject,
   deleteDoc,
   doc,
   onAuthStateChanged,

@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   db,
+  deleteObject,
   deleteDoc,
   doc,
   firebaseEnabled,
@@ -147,6 +148,14 @@ export async function removeRecord(collectionName, id) {
   }
 
   await deleteDoc(doc(db, collectionName, id));
+}
+
+export async function removeStorageFile(url) {
+  if (!firebaseEnabled || !storage || !url || !String(url).includes("firebasestorage.googleapis.com")) {
+    return;
+  }
+
+  await deleteObject(storageRef(storage, url));
 }
 
 export async function uploadHomePhoto(homeId, file) {
