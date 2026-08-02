@@ -45,7 +45,11 @@ service cloud.firestore {
       allow update: if isAdmin()
         || resource.data.fromUserId == request.auth.uid
         || resource.data.toUserId == request.auth.uid;
-      allow delete: if isAdmin();
+      allow delete: if isAdmin()
+        || (
+          resource.data.fromUserId == request.auth.uid
+          && resource.data.status != "pending"
+        );
     }
   }
 }

@@ -552,6 +552,19 @@ function App() {
     }
   }
 
+  async function deleteRequest(id) {
+    try {
+      setFirebaseError("");
+      await removeRecord("exchangeRequests", id);
+      updateState((current) => ({
+        ...current,
+        requests: current.requests.filter((request) => request.id !== id),
+      }));
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
+  }
+
   async function addRequestMessage(id, text) {
     try {
       setFirebaseError("");
@@ -765,6 +778,7 @@ function App() {
             onStatus={updateRequestStatus}
             onMessage={addRequestMessage}
             onSave={saveRequestDetails}
+            onDelete={deleteRequest}
           />
         )}
         {activeTab === "profile" && <ProfileView profile={currentProfile} onSave={saveProfile} />}
@@ -1282,7 +1296,7 @@ function MatcherView({ matches, onRequest }) {
   );
 }
 
-function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onMessage, onSave }) {
+function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onMessage, onSave, onDelete }) {
   const visibleRequests = requests.filter((request) => request.fromUserId === currentProfile.id || request.toUserId === currentProfile.id || currentProfile.isAdmin);
 
   return (
@@ -1300,6 +1314,7 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
           onStatus={onStatus}
           onMessage={onMessage}
           onSave={onSave}
+          onDelete={onDelete}
         />
       ))}
       {!visibleRequests.length && <EmptyState title="Keine Anfragen" text="Neue Tauschanfragen erscheinen hier mit Status und Nachrichtenverlauf." />}
@@ -1922,7 +1937,7 @@ function RequestPanel({ draft, home, onClose, onSubmit }) {
   );
 }
 
-function RequestCard({ request, home, from, to, homes, profiles, currentProfile, onStatus, onMessage, onSave }) {
+function RequestCard({ request, home, from, to, homes, profiles, currentProfile, onStatus, onMessage, onSave, onDelete }) {
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -1936,6 +1951,7 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
   });
   const incoming = request.toUserId === currentProfile.id;
   const canAdminEdit = currentProfile.isAdmin;
+  const canDelete = currentProfile.isAdmin || (request.fromUserId === currentProfile.id && request.status !== "pending");
 
   useEffect(() => {
     if (!editing) {
@@ -1975,6 +1991,18 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
           {canAdminEdit && (
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => setEditing((current) => !current)}>
               <Pencil size={17} /> {editing ? "Schliessen" : "Bearbeiten"}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d8c4bd] px-3 text-sm font-semibold text-[#9f3f34]"
+              onClick={() => {
+                if (window.confirm("Diese Tauschanfrage wirklich komplett loeschen?")) {
+                  onDelete(request.id);
+                }
+              }}
+            >
+              <Trash2 size={17} /> Loeschen
             </button>
           )}
           {incoming && request.status === "pending" && (
