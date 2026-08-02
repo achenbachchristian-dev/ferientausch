@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
+  DatabaseZap,
   Home,
   ImagePlus,
   LogOut,
@@ -466,6 +467,28 @@ function App() {
     }
   }
 
+  async function runFirebaseWriteTest() {
+    if (!firebaseEnabled || !currentProfile) {
+      return;
+    }
+
+    try {
+      setFirebaseError("");
+      const testedAt = new Date().toISOString();
+      await saveRecord("profiles", {
+        ...currentProfile,
+        diagnostics: {
+          lastWriteTestAt: testedAt,
+          projectId: firebaseProjectId,
+          uid: currentProfile.id,
+        },
+      });
+      setFirebaseNotice(`Firebase-Test gespeichert: profiles/${currentProfile.id}`);
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
+  }
+
   async function toggleAdmin(profileId) {
     const profile = state.profiles.find((entry) => entry.id === profileId);
     const next = { ...profile, isAdmin: !profile.isAdmin };
@@ -546,6 +569,11 @@ function App() {
             <Pill tone={firebaseEnabled && firebaseConfigComplete ? "green" : "amber"}>
               {firebaseEnabled ? `Firebase: ${firebaseProjectId}` : "Demo-Modus"}
             </Pill>
+            {firebaseEnabled && (
+              <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={runFirebaseWriteTest}>
+                <DatabaseZap size={18} /> Test
+              </button>
+            )}
             {currentProfile.isAdmin && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
                 <ShieldCheck size={18} /> Admin
@@ -1392,28 +1420,29 @@ function fileToDataUrl(file) {
 
 function formatFirebaseError(error) {
   const code = error?.code ?? "";
+  const technicalDetail = code ? ` (${code})` : "";
 
   if (code.includes("permission-denied")) {
-    return "Firebase blockiert den Zugriff. Pruefe Firestore-Regeln und ob du angemeldet bist.";
+    return `Firebase blockiert den Zugriff. Pruefe Firestore-Regeln und ob du angemeldet bist.${technicalDetail}`;
   }
 
   if (code.includes("auth/unauthorized-domain")) {
-    return "Diese Domain ist in Firebase Authentication noch nicht autorisiert.";
+    return `Diese Domain ist in Firebase Authentication noch nicht autorisiert.${technicalDetail}`;
   }
 
   if (code.includes("auth/invalid-credential") || code.includes("auth/wrong-password")) {
-    return "Login fehlgeschlagen. Bitte E-Mail und Passwort pruefen.";
+    return `Login fehlgeschlagen. Bitte E-Mail und Passwort pruefen.${technicalDetail}`;
   }
 
   if (code.includes("auth/email-already-in-use")) {
-    return "Diese E-Mail ist bereits registriert.";
+    return `Diese E-Mail ist bereits registriert.${technicalDetail}`;
   }
 
   if (code.includes("auth/operation-not-allowed")) {
-    return "Diese Login-Methode ist in Firebase Authentication noch nicht aktiviert.";
+    return `Diese Login-Methode ist in Firebase Authentication noch nicht aktiviert.${technicalDetail}`;
   }
 
-  return error?.message ?? "Firebase-Fehler. Bitte Konfiguration und Regeln pruefen.";
+  return error?.message ? `${error.message}${technicalDetail}` : `Firebase-Fehler. Bitte Konfiguration und Regeln pruefen.${technicalDetail}`;
 }
 
 export default App;
