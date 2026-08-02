@@ -655,8 +655,8 @@ function App() {
       <header className="sticky top-0 z-20 border-b border-[#ded8cb] bg-[#f7f4ed]/95 shadow-[0_10px_30px_rgba(36,49,58,0.06)] backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="grid h-12 w-12 place-items-center rounded-lg bg-[#2d6a62] text-white shadow-soft">
-              <Home size={22} />
+            <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-lg bg-white p-1 shadow-soft">
+              <img className="h-full w-full object-contain" src="/logo-mark.png" alt="FerienTausch" />
             </div>
             <div>
               <p className="text-xs font-bold uppercase text-[#6e7a72]">Privater Haustausch im Freundeskreis</p>
@@ -813,6 +813,7 @@ function AuthScreen({ authMode, error, onAuthModeChange, onSubmit, onAnonymous }
             className="rounded-lg bg-white p-5 shadow-soft"
             onSubmit={(event) => onSubmit(event, event.currentTarget)}
           >
+            <img className="mb-5 h-auto w-full max-w-sm" src="/logo-wordmark.png" alt="FerienTausch" />
             <div className="mb-5 flex rounded-lg bg-[#edf1e8] p-1">
               <button
                 type="button"
