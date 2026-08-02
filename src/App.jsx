@@ -22,6 +22,8 @@ import {
   UserPlus,
   Users,
   X,
+  ArrowLeft,
+  ArrowRight,
 } from "lucide-react";
 import {
   auth,
@@ -43,6 +45,7 @@ import {
   saveRecord,
   subscribeCollection,
   subscribeRequestsForUser,
+  uploadHomePhoto,
 } from "./lib/store";
 
 const tabs = [
@@ -97,6 +100,27 @@ function getProfileName(profile) {
   return fullName || profile.familyName || profile.email || "Unbekannt";
 }
 
+function getHomePhotos(home) {
+  return Array.isArray(home?.photos) ? home.photos.filter(Boolean) : [];
+}
+
+function getHomeCoverPhoto(home) {
+  const photos = getHomePhotos(home);
+  if (!photos.length) {
+    return "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80";
+  }
+
+  const coverIndex = Number.isFinite(Number(home.coverPhotoIndex)) ? Number(home.coverPhotoIndex) : 0;
+  return photos[Math.min(Math.max(coverIndex, 0), photos.length - 1)] ?? photos[0];
+}
+
+function moveArrayItem(items, fromIndex, toIndex) {
+  const next = [...items];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+}
+
 function App() {
   const [state, setState] = useState(() => (firebaseEnabled ? emptyState : loadLocalState()));
   const [currentUserId, setCurrentUserId] = useState(() =>
@@ -108,6 +132,7 @@ function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
+  const [selectedHomeId, setSelectedHomeId] = useState(null);
   const [query, setQuery] = useState("");
   const [minGuests, setMinGuests] = useState("");
   const [travelStart, setTravelStart] = useState("");
@@ -385,6 +410,7 @@ function App() {
   async function upsertHome(home) {
     try {
       setFirebaseError("");
+      const photos = getHomePhotos(home);
       const normalized = {
         ...home,
         maxGuests: Number(home.maxGuests),
@@ -392,7 +418,11 @@ function App() {
         bathrooms: Number(home.bathrooms),
         managedBy: home.managedBy ?? currentProfile.id,
         ownerId: home.ownerId ?? currentProfile.id,
-        photos: home.photos.filter(Boolean),
+        photos,
+        coverPhotoIndex: Math.min(
+          Math.max(Number(home.coverPhotoIndex ?? 0), 0),
+          Math.max(photos.length - 1, 0),
+        ),
       };
 
       await saveRecord("homes", normalized);
@@ -579,6 +609,20 @@ function App() {
     }
   }
 
+  async function handleHomePhotoUpload(homeId, file) {
+    try {
+      setFirebaseError("");
+      const uploadedUrl = await uploadHomePhoto(homeId, file);
+      if (uploadedUrl) {
+        return uploadedUrl;
+      }
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
+
+    return fileToDataUrl(file);
+  }
+
   if (firebaseEnabled && !authChecked) {
     return <LoadingScreen title="Firebase wird verbunden" text="Einen Moment, die Anmeldung wird geprueft." />;
   }
@@ -666,6 +710,7 @@ function App() {
             matches={matches}
             profiles={state.profiles}
             onNavigate={setActiveTab}
+            onDetails={setSelectedHomeId}
             onRequest={setRequestDraft}
           />
         )}
@@ -683,10 +728,11 @@ function App() {
             travelEnd={travelEnd}
             setTravelEnd={setTravelEnd}
             onRequest={setRequestDraft}
+            onDetails={setSelectedHomeId}
           />
         )}
         {activeTab === "my-home" && (
-          <MyHomeView homes={ownedHomes} currentProfile={currentProfile} onSave={upsertHome} onDelete={deleteHome} />
+          <MyHomeView homes={ownedHomes} currentProfile={currentProfile} onSave={upsertHome} onDelete={deleteHome} onUploadPhoto={handleHomePhotoUpload} />
         )}
         {activeTab === "calendar" && (
           <CalendarView
@@ -717,6 +763,7 @@ function App() {
             currentProfile={currentProfile}
             onSaveHome={upsertHome}
             onDeleteHome={deleteHome}
+            onUploadPhoto={handleHomePhotoUpload}
             onSaveProfile={saveProfile}
             onToggleAdmin={toggleAdmin}
             onDeleteProfile={deleteProfile}
@@ -726,6 +773,19 @@ function App() {
 
       {requestDraft && (
         <RequestPanel draft={requestDraft} home={state.homes.find((home) => home.id === requestDraft.homeId)} onClose={() => setRequestDraft(null)} onSubmit={createRequest} />
+      )}
+      {selectedHomeId && (
+        <HomeDetailPanel
+          home={state.homes.find((home) => home.id === selectedHomeId)}
+          owner={state.profiles.find((profile) => profile.id === state.homes.find((home) => home.id === selectedHomeId)?.ownerId)}
+          availabilities={state.availabilities.filter((availability) => availability.homeId === selectedHomeId)}
+          disabled={state.homes.find((home) => home.id === selectedHomeId)?.ownerId === currentProfile.id}
+          onClose={() => setSelectedHomeId(null)}
+          onRequest={(draft) => {
+            setRequestDraft(draft);
+            setSelectedHomeId(null);
+          }}
+        />
       )}
     </div>
   );
@@ -850,6 +910,7 @@ function DashboardView({
   matches,
   profiles,
   onNavigate,
+  onDetails,
   onRequest,
 }) {
   const ownedHomeIds = new Set(ownedHomes.map((home) => home.id));
@@ -976,9 +1037,9 @@ function DashboardView({
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {featuredHomes.map((home) => (
-              <button key={home.id} className="overflow-hidden rounded-lg border border-[#edf0ea] bg-white text-left" onClick={() => onNavigate("discover")}>
+              <button key={home.id} className="overflow-hidden rounded-lg border border-[#edf0ea] bg-white text-left" onClick={() => onDetails(home.id)}>
                 <div className="aspect-[4/3] bg-[#edf1e8]">
-                  <img className="h-full w-full object-cover" src={home.photos[0] || "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80"} alt="" />
+                  <img className="h-full w-full object-cover" src={getHomeCoverPhoto(home)} alt="" />
                 </div>
                 <div className="p-3">
                   <strong className="line-clamp-2 text-sm">{home.title}</strong>
@@ -1039,6 +1100,7 @@ function DiscoverView({
   travelEnd,
   setTravelEnd,
   onRequest,
+  onDetails,
 }) {
   return (
     <div className="space-y-5">
@@ -1055,6 +1117,7 @@ function DiscoverView({
             home={home}
             availabilities={allAvailabilities.filter((availability) => availability.homeId === home.id)}
             disabled={home.ownerId === currentProfile.id}
+            onDetails={() => onDetails(home.id)}
             onRequest={() =>
               onRequest({
                 homeId: home.id,
@@ -1071,7 +1134,7 @@ function DiscoverView({
   );
 }
 
-function MyHomeView({ homes, currentProfile, onSave, onDelete }) {
+function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) {
   const [editing, setEditing] = useState(homes[0] ?? { ...blankHouse, id: createId("home"), ownerId: currentProfile.id, managedBy: currentProfile.id });
 
   useEffect(() => {
@@ -1103,7 +1166,7 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete }) {
           </button>
         ))}
       </section>
-      <HouseEditor value={editing} onChange={setEditing} onSave={onSave} onDelete={onDelete} />
+      <HouseEditor value={editing} onChange={setEditing} onSave={onSave} onDelete={onDelete} onUploadPhoto={onUploadPhoto} />
     </div>
   );
 }
@@ -1255,7 +1318,7 @@ function ProfileView({ profile, onSave }) {
   );
 }
 
-function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onSaveProfile, onToggleAdmin, onDeleteProfile }) {
+function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPhoto, onSaveProfile, onToggleAdmin, onDeleteProfile }) {
   const [externalHome, setExternalHome] = useState({
     ...blankHouse,
     id: createId("home"),
@@ -1333,6 +1396,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onSaveProf
             compact
             value={externalHome}
             onChange={setExternalHome}
+            onUploadPhoto={onUploadPhoto}
             onSave={(home) => {
               onSaveHome({ ...home, isExternal: true, managedBy: currentProfile.id });
               setExternalHome({ ...blankHouse, id: createId("home"), ownerId: createId("external"), managedBy: currentProfile.id, isExternal: true });
@@ -1360,13 +1424,13 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onSaveProf
   );
 }
 
-function HomeCard({ home, availabilities, disabled, onRequest }) {
+function HomeCard({ home, availabilities, disabled, onDetails, onRequest }) {
   const [showMap, setShowMap] = useState(false);
 
   return (
     <article className="group overflow-hidden rounded-lg border border-white bg-white shadow-soft transition hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(32,45,54,0.16)]">
       <div className="relative aspect-[4/3] bg-[#dfe5dc]">
-        <img className="h-full w-full object-cover" src={home.photos[0] || "https://images.unsplash.com/photo-1564013799919-ab600027ffc6?auto=format&fit=crop&w=1200&q=80"} alt="" />
+        <img className="h-full w-full object-cover" src={getHomeCoverPhoto(home)} alt="" />
         <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent" />
         <div className="absolute left-3 top-3 flex gap-2">
           {home.isExternal && <Pill tone="amber">Extern</Pill>}
@@ -1405,6 +1469,13 @@ function HomeCard({ home, availabilities, disabled, onRequest }) {
         </div>
         <button
           className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-4 text-sm font-semibold text-[#24313a] hover:bg-[#edf1e8]"
+          onClick={onDetails}
+          type="button"
+        >
+          <Search size={17} /> Details ansehen
+        </button>
+        <button
+          className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-4 text-sm font-semibold text-[#24313a] hover:bg-[#edf1e8]"
           onClick={() => setShowMap((current) => !current)}
           type="button"
         >
@@ -1420,6 +1491,117 @@ function HomeCard({ home, availabilities, disabled, onRequest }) {
         </button>
       </div>
     </article>
+  );
+}
+
+function HomeDetailPanel({ home, owner, availabilities, disabled, onClose, onRequest }) {
+  const photos = getHomePhotos(home);
+  const initialIndex = Math.min(Math.max(Number(home?.coverPhotoIndex ?? 0), 0), Math.max(photos.length - 1, 0));
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(initialIndex);
+
+  if (!home) {
+    return null;
+  }
+
+  const selectedPhoto = photos[selectedPhotoIndex] ?? getHomeCoverPhoto(home);
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-end bg-black/45 p-3 sm:place-items-center">
+      <section className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-soft scrollbar-thin">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-[#edf0ea] bg-white px-4 py-3">
+          <div>
+            <h2 className="text-xl font-bold">{home.title}</h2>
+            <p className="text-sm text-[#66756d]">{home.city} · {owner ? getProfileName(owner) : "Privates Angebot"}</p>
+          </div>
+          <IconButton label="Schliessen" onClick={onClose}>
+            <X size={18} />
+          </IconButton>
+        </div>
+        <div className="grid gap-5 p-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <div>
+            <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#edf1e8]">
+              <img className="h-full w-full object-cover" src={selectedPhoto} alt="" />
+              {photos.length > 1 && (
+                <div className="absolute inset-x-3 top-1/2 flex -translate-y-1/2 justify-between">
+                  <IconButton label="Vorheriges Bild" onClick={() => setSelectedPhotoIndex((current) => (current === 0 ? photos.length - 1 : current - 1))}>
+                    <ArrowLeft size={18} />
+                  </IconButton>
+                  <IconButton label="Naechstes Bild" onClick={() => setSelectedPhotoIndex((current) => (current + 1) % photos.length)}>
+                    <ArrowRight size={18} />
+                  </IconButton>
+                </div>
+              )}
+            </div>
+            {photos.length > 1 && (
+              <div className="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-6">
+                {photos.map((photo, index) => (
+                  <button
+                    key={`${photo}-${index}`}
+                    className={`aspect-[4/3] overflow-hidden rounded-lg border ${selectedPhotoIndex === index ? "border-[#2d6a62]" : "border-[#edf0ea]"}`}
+                    onClick={() => setSelectedPhotoIndex(index)}
+                  >
+                    <img className="h-full w-full object-cover" src={photo} alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="mt-5">
+              <h3 className="text-lg font-bold">Beschreibung</h3>
+              <p className="mt-2 text-sm leading-6 text-[#4f5d55]">{home.description}</p>
+            </div>
+            <div className="mt-5">
+              <h3 className="text-lg font-bold">Ausstattung</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {home.amenities.map((amenity) => <Pill key={amenity}>{amenity}</Pill>)}
+              </div>
+            </div>
+          </div>
+          <aside className="space-y-4">
+            <div className="rounded-lg border border-[#edf0ea] p-4">
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <Fact icon={Users} label={`${home.maxGuests} Gaeste`} />
+                <Fact icon={BedDouble} label={`${home.bedrooms} Schlafz.`} />
+                <Fact icon={Bath} label={`${home.bathrooms} Bad`} />
+              </div>
+              <p className="mt-4 inline-flex items-center gap-2 text-sm text-[#66756d]">
+                <MapPin size={16} /> {home.address || home.city}
+              </p>
+              <button
+                className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 font-semibold text-white disabled:bg-[#b7bdb8]"
+                disabled={disabled}
+                onClick={() =>
+                  onRequest({
+                    homeId: home.id,
+                    start: availabilities[0]?.start ?? "",
+                    end: availabilities[0]?.end ?? "",
+                    guests: Math.min(4, home.maxGuests),
+                    message: "",
+                  })
+                }
+              >
+                <Send size={18} /> {disabled ? "Eigenes Haus" : "Tausch anfragen"}
+              </button>
+            </div>
+            <div className="rounded-lg border border-[#edf0ea] p-4">
+              <h3 className="text-lg font-bold">Freie Zeitraeume</h3>
+              <div className="mt-3 space-y-2">
+                {availabilities.map((availability) => (
+                  <DateRow
+                    key={availability.id}
+                    title={availability.title}
+                    subtitle={home.title}
+                    start={availability.start}
+                    end={availability.end}
+                  />
+                ))}
+                {!availabilities.length && <EmptyState title="Keine Zeitraeume" text="Fuer dieses Haus sind noch keine freien Zeitraeume eingetragen." />}
+              </div>
+            </div>
+            <MapPreview home={home} />
+          </aside>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1460,11 +1642,19 @@ function MapPreview({ home }) {
   );
 }
 
-function HouseEditor({ value, onChange, onSave, onDelete, compact = false }) {
+function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact = false }) {
   const [photoUrl, setPhotoUrl] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   function updateField(field, nextValue) {
     onChange({ ...value, [field]: nextValue });
+  }
+
+  function updatePhotos(nextPhotos, nextCoverIndex = value.coverPhotoIndex ?? 0) {
+    const coverPhotoIndex = nextPhotos.length
+      ? Math.min(Math.max(Number(nextCoverIndex), 0), nextPhotos.length - 1)
+      : 0;
+    onChange({ ...value, photos: nextPhotos, coverPhotoIndex });
   }
 
   async function handleFile(event) {
@@ -1472,8 +1662,12 @@ function HouseEditor({ value, onChange, onSave, onDelete, compact = false }) {
     if (!file) {
       return;
     }
-    const dataUrl = await fileToDataUrl(file);
-    updateField("photos", [...value.photos, dataUrl]);
+
+    setUploadingPhoto(true);
+    const photoUrl = onUploadPhoto ? await onUploadPhoto(value.id, file) : await fileToDataUrl(file);
+    updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0);
+    setUploadingPhoto(false);
+    event.target.value = "";
   }
 
   return (
@@ -1519,17 +1713,58 @@ function HouseEditor({ value, onChange, onSave, onDelete, compact = false }) {
       <div className="mt-4">
         <span className="text-sm font-semibold">Bildergalerie</span>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {value.photos.map((photo, index) => (
-            <div key={`${photo}-${index}`} className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#edf1e8]">
+          {getHomePhotos(value).map((photo, index) => (
+            <div key={`${photo}-${index}`} className={`relative aspect-[4/3] overflow-hidden rounded-lg border bg-[#edf1e8] ${Number(value.coverPhotoIndex ?? 0) === index ? "border-[#2d6a62]" : "border-transparent"}`}>
               <img className="h-full w-full object-cover" src={photo} alt="" />
-              <button
-                type="button"
-                className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-lg bg-white/90"
-                onClick={() => updateField("photos", value.photos.filter((_, photoIndex) => photoIndex !== index))}
-                aria-label="Bild entfernen"
-              >
-                <X size={16} />
-              </button>
+              {Number(value.coverPhotoIndex ?? 0) === index && (
+                <span className="absolute left-2 top-2 rounded-lg bg-white/92 px-2 py-1 text-xs font-bold text-[#255c37]">Titelbild</span>
+              )}
+              <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1">
+                <button type="button" className="rounded-lg bg-white/92 px-2 py-1 text-xs font-bold" onClick={() => updatePhotos(getHomePhotos(value), index)}>
+                  Titel
+                </button>
+                <button
+                  type="button"
+                  className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 disabled:opacity-45"
+                  disabled={index === 0}
+                  onClick={() => {
+                    const nextPhotos = moveArrayItem(getHomePhotos(value), index, index - 1);
+                    const currentCover = Number(value.coverPhotoIndex ?? 0);
+                    const nextCover = currentCover === index ? index - 1 : currentCover === index - 1 ? index : currentCover;
+                    updatePhotos(nextPhotos, nextCover);
+                  }}
+                  aria-label="Bild nach links"
+                >
+                  <ArrowLeft size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 disabled:opacity-45"
+                  disabled={index === getHomePhotos(value).length - 1}
+                  onClick={() => {
+                    const nextPhotos = moveArrayItem(getHomePhotos(value), index, index + 1);
+                    const currentCover = Number(value.coverPhotoIndex ?? 0);
+                    const nextCover = currentCover === index ? index + 1 : currentCover === index + 1 ? index : currentCover;
+                    updatePhotos(nextPhotos, nextCover);
+                  }}
+                  aria-label="Bild nach rechts"
+                >
+                  <ArrowRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="grid h-7 w-7 place-items-center rounded-lg bg-white/92 text-[#9f3f34]"
+                  onClick={() => {
+                    const nextPhotos = getHomePhotos(value).filter((_, photoIndex) => photoIndex !== index);
+                    const currentCover = Number(value.coverPhotoIndex ?? 0);
+                    const nextCover = currentCover === index ? 0 : currentCover > index ? currentCover - 1 : currentCover;
+                    updatePhotos(nextPhotos, nextCover);
+                  }}
+                  aria-label="Bild entfernen"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -1540,7 +1775,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, compact = false }) {
             className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 font-semibold"
             onClick={() => {
               if (photoUrl) {
-                updateField("photos", [...value.photos, photoUrl]);
+                updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0);
                 setPhotoUrl("");
               }
             }}
@@ -1548,7 +1783,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, compact = false }) {
             <Plus size={18} /> URL
           </button>
           <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#24313a] px-3 font-semibold text-white">
-            <ImagePlus size={18} /> Upload
+            <ImagePlus size={18} /> {uploadingPhoto ? "Laedt..." : "Upload"}
             <input className="sr-only" type="file" accept="image/*" onChange={handleFile} />
           </label>
         </div>

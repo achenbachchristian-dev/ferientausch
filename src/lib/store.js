@@ -5,10 +5,14 @@ import {
   deleteDoc,
   doc,
   firebaseEnabled,
+  getDownloadURL,
   onSnapshot,
   query,
   setDoc,
+  storage,
+  storageRef,
   updateDoc,
+  uploadBytes,
   where,
 } from "./firebase";
 import { createSeedState } from "./demoData";
@@ -129,4 +133,16 @@ export async function removeRecord(collectionName, id) {
   }
 
   await deleteDoc(doc(db, collectionName, id));
+}
+
+export async function uploadHomePhoto(homeId, file) {
+  if (!firebaseEnabled || !storage) {
+    return null;
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const path = `homes/${homeId}/${createId("photo")}-${safeName}`;
+  const reference = storageRef(storage, path);
+  await uploadBytes(reference, file, { contentType: file.type });
+  return getDownloadURL(reference);
 }

@@ -19,6 +19,12 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import {
+  getDownloadURL,
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+} from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -43,6 +49,7 @@ export const firebaseConfigComplete = Boolean(
 
 const app = firebaseEnabled ? initializeApp(firebaseConfig) : null;
 export const auth = app ? getAuth(app) : null;
+export const storage = app ? getStorage(app) : null;
 export const db = app
   ? initializeFirestore(
       app,
@@ -67,6 +74,9 @@ export {
   signInAnonymously,
   signInWithEmailAndPassword,
   signOut,
+  storageRef,
   updateDoc,
+  uploadBytes,
   where,
+  getDownloadURL,
 };

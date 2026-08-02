@@ -27,8 +27,10 @@ Ohne Firebase-Konfiguration startet die App im Demo-Modus mit lokalen Beispielda
 1. Firebase-Projekt erstellen.
 2. Authentication aktivieren: E-Mail/Passwort und optional Anonym.
 3. Firestore Database erstellen.
-4. Firestore-Regeln aus `firestore.rules` in der Firebase Console veroeffentlichen.
-5. `.env.example` nach `.env.local` kopieren und Werte eintragen.
+4. Firebase Storage aktivieren.
+5. Firestore-Regeln aus `firestore.rules` in der Firebase Console veroeffentlichen.
+6. Storage-Regeln aus `storage.rules` in der Firebase Console veroeffentlichen.
+7. `.env.example` nach `.env.local` kopieren und Werte eintragen.
 
 ```bash
 VITE_FIREBASE_API_KEY=...
@@ -71,4 +73,4 @@ npm run build
 
 ## Hinweis zu Bildern
 
-Die Galerie akzeptiert Bild-URLs und lokale Uploads als Browser-Daten-URL. Fuer produktive Nutzung mit sehr vielen Fotos empfiehlt sich Firebase Storage.
+Die Galerie akzeptiert Bild-URLs. In Firebase werden lokale Uploads in Firebase Storage gespeichert und als Download-URL am Haus hinterlegt. Im Demo-Modus ohne Firebase nutzt die App weiterhin lokale Browser-Daten-URLs.
