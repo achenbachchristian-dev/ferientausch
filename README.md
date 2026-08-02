@@ -71,6 +71,29 @@ Auf Vercel importieren, die gleichen Firebase-Variablen als Environment Variable
 npm run build
 ```
 
+### Mailbenachrichtigungen mit Resend
+
+Die App enthaelt eine Vercel Function unter `api/send-mail.js`. Sie verschickt E-Mails ueber Resend und prueft vorher das Firebase-ID-Token des angemeldeten Nutzers.
+
+In Vercel muessen zusaetzlich gesetzt werden:
+
+```bash
+RESEND_API_KEY=...
+MAIL_FROM="FerienTausch <noreply@deine-domain.de>"
+FIREBASE_SERVICE_ACCOUNT_KEY=...
+FIRESTORE_DATABASE_ID=ferientausch
+```
+
+`FIREBASE_SERVICE_ACCOUNT_KEY` ist der JSON-Inhalt eines Firebase-Service-Accounts. Alternativ kann der JSON-Inhalt base64-kodiert eingetragen werden.
+
+Ausgeloest werden E-Mails bei:
+
+- neuer Registrierung an Admins
+- neuer Tauschanfrage an den Hauseigentuemer
+- angenommener oder abgelehnter Anfrage an die anfragende Familie
+- neuer Nachricht im Anfrageverlauf an die Gegenseite
+- Profilfreigabe an den neuen Nutzer
+
 ## Hinweis zu Bildern
 
 Die Galerie akzeptiert Bild-URLs. In Firebase werden lokale Uploads in Firebase Storage gespeichert und als Download-URL am Haus hinterlegt. Im Demo-Modus ohne Firebase nutzt die App weiterhin lokale Browser-Daten-URLs.

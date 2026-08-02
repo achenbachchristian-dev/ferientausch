@@ -41,6 +41,7 @@ import {
   signOut,
 } from "./lib/firebase";
 import { amenityOptions } from "./lib/demoData";
+import { sendEmailNotification } from "./lib/emailNotifications";
 import {
   bookingFromRequest,
   findMatches,
@@ -747,6 +748,7 @@ function App() {
             approved: false,
           };
           await saveRecord("profiles", profile);
+          sendEmailNotification({ type: "new-registration", profileId: credentials.user.uid });
         } else {
           await signInWithEmailAndPassword(auth, email, password);
         }
@@ -971,6 +973,7 @@ function App() {
       await saveRecord("exchangeRequests", request);
       updateState((current) => ({ ...current, requests: [...current.requests, request] }));
       await logAudit("Tauschanfrage erstellt", "request", request.id, targetHome.title);
+      sendEmailNotification({ type: "exchange-request-created", requestId: request.id });
       setRequestDraft(null);
       setActiveTab("requests");
     } catch (error) {
@@ -1047,6 +1050,7 @@ function App() {
             : (current.bookings ?? []).filter((booking) => booking.requestId !== id),
       }));
       await logAudit(`Tauschanfrage ${statusLabels[status] ?? status}`, "request", id);
+      sendEmailNotification({ type: "request-status-changed", requestId: id });
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1125,6 +1129,9 @@ function App() {
             : (current.bookings ?? []).filter((booking) => booking.requestId !== id),
       }));
       await logAudit("Tauschanfrage bearbeitet", "request", id);
+      if (existing.status !== nextRequest.status) {
+        sendEmailNotification({ type: "request-status-changed", requestId: id });
+      }
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1170,6 +1177,7 @@ function App() {
         requests: current.requests.map((entry) => (entry.id === id ? { ...entry, messages } : entry)),
       }));
       await logAudit("Nachricht geschrieben", "request", id);
+      sendEmailNotification({ type: "request-message-created", requestId: id, message: text });
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
     }
@@ -1222,6 +1230,9 @@ function App() {
       approvedBy: approving ? currentProfile.id : "",
     };
     await saveProfile(next);
+    if (approving) {
+      sendEmailNotification({ type: "profile-approved", profileId });
+    }
   }
 
   async function deleteHome(id) {
