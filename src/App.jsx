@@ -2409,6 +2409,7 @@ function AdminView({
     { id: "export", label: "Export" },
   ];
   const bookings = mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]);
+  const bookingOffers = getBookableAvailabilities(state.availabilities, bookings);
   const pendingProfiles = state.profiles.filter((profile) => !isProfileApproved(profile));
   const openRequests = state.requests.filter((request) => request.status === "pending");
   const incompleteHomes = state.homes
@@ -2735,20 +2736,47 @@ function AdminView({
       )}
       {adminSection === "bookings" && (
         <section className="rounded-lg bg-white p-4 shadow-soft">
-          <h2 className="text-xl font-bold">Alle Buchungen</h2>
-          <AdminBookingCalendar homes={state.homes} availabilities={state.availabilities} bookings={bookings} />
-          <div className="mt-3 grid gap-3">
-            {bookings.map((booking) => (
-              <DateRow
-                key={booking.id}
-                title={state.homes.find((home) => home.id === booking.homeId)?.title ?? "Unterkunft"}
-                subtitle={`${booking.guests || 0} Personen`}
-                start={booking.start}
-                end={booking.end}
-                status="booked"
-              />
-            ))}
-            {!bookings.length && <EmptyState title="Keine Buchungen" text="Angenommene Anfragen erscheinen hier automatisch." />}
+          <h2 className="text-xl font-bold">Buchungen & Angebote</h2>
+          <AdminBookingCalendar homes={state.homes} offers={bookingOffers} bookings={bookings} />
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-lg font-bold">Tatsächliche Buchungen</h3>
+                <Pill tone="red">{bookings.length}</Pill>
+              </div>
+              <div className="grid gap-3">
+                {bookings.map((booking) => (
+                  <DateRow
+                    key={booking.id}
+                    title={state.homes.find((home) => home.id === booking.homeId)?.title ?? "Unterkunft"}
+                    subtitle={`${booking.guests || 0} Personen · angenommen`}
+                    start={booking.start}
+                    end={booking.end}
+                    status="booked"
+                  />
+                ))}
+                {!bookings.length && <EmptyState title="Keine tatsächlichen Buchungen" text="Angenommene Tauschanfragen erscheinen hier." />}
+              </div>
+            </div>
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-lg font-bold">Buchungsangebote</h3>
+                <Pill tone="green">{bookingOffers.length}</Pill>
+              </div>
+              <div className="grid gap-3">
+                {bookingOffers.map((offer) => (
+                  <DateRow
+                    key={offer.id}
+                    title={state.homes.find((home) => home.id === offer.homeId)?.title ?? "Unterkunft"}
+                    subtitle={`${offer.title || "Freier Zeitraum"} · noch anfragbar`}
+                    start={offer.start}
+                    end={offer.end}
+                    status="free"
+                  />
+                ))}
+                {!bookingOffers.length && <EmptyState title="Keine Buchungsangebote" text="Freie, noch buchbare Zeiträume erscheinen hier." />}
+              </div>
+            </div>
           </div>
         </section>
       )}
@@ -3699,21 +3727,21 @@ function AdminTaskPanel({ tasks, compact = false, onOpenAll }) {
   );
 }
 
-function AdminBookingCalendar({ homes, availabilities, bookings }) {
+function AdminBookingCalendar({ homes, offers, bookings }) {
   const rows = homes.map((home) => {
-    const homeAvailabilities = availabilities.filter((availability) => availability.homeId === home.id && availability.end >= todayIso());
+    const homeOffers = offers.filter((offer) => offer.homeId === home.id && offer.end >= todayIso());
     const homeBookings = bookings.filter((booking) => booking.homeId === home.id);
-    return { home, homeAvailabilities, homeBookings };
+    return { home, homeOffers, homeBookings };
   });
 
   return (
     <div className="mt-4 grid gap-3 lg:grid-cols-2">
-      {rows.map(({ home, homeAvailabilities, homeBookings }) => (
+      {rows.map(({ home, homeOffers, homeBookings }) => (
         <div key={home.id} className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <strong>{home.title}</strong>
-            <Pill tone={homeBookings.length ? "amber" : homeAvailabilities.length ? "green" : "red"}>
-              {homeBookings.length ? `${homeBookings.length} Buchung(en)` : homeAvailabilities.length ? "Frei" : "Keine Freigabe"}
+            <Pill tone={homeBookings.length ? "red" : homeOffers.length ? "green" : "neutral"}>
+              {homeBookings.length ? `${homeBookings.length} Buchung(en)` : homeOffers.length ? `${homeOffers.length} Angebot(e)` : "Keine Angebote"}
             </Pill>
           </div>
           <div className="mt-3 space-y-2">
@@ -3721,8 +3749,8 @@ function AdminBookingCalendar({ homes, availabilities, bookings }) {
               <DateRow key={booking.id} title="Gebucht" subtitle={home.title} start={booking.start} end={booking.end} status="booked" />
             ))}
             {!homeBookings.length &&
-              homeAvailabilities.slice(0, 2).map((availability) => (
-                <DateRow key={availability.id} title={availability.title || "Frei"} subtitle={home.title} start={availability.start} end={availability.end} status="free" />
+              homeOffers.slice(0, 2).map((offer) => (
+                <DateRow key={offer.id} title="Buchungsangebot" subtitle={offer.title || home.title} start={offer.start} end={offer.end} status="free" />
               ))}
           </div>
         </div>
