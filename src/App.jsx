@@ -35,7 +35,15 @@ import {
   signOut,
 } from "./lib/firebase";
 import { amenityOptions } from "./lib/demoData";
-import { findMatches, formatDateRange } from "./lib/matching";
+import {
+  bookingFromRequest,
+  findMatches,
+  formatDateRange,
+  getAcceptedBookings,
+  getAvailabilityBookingState,
+  getBookableAvailabilities,
+  isRangeBookable,
+} from "./lib/matching";
 import {
   createId,
   loadLocalState,
@@ -89,6 +97,7 @@ const emptyState = {
   homes: [],
   availabilities: [],
   requests: [],
+  bookings: [],
 };
 
 function getProfileName(profile) {
@@ -98,6 +107,17 @@ function getProfileName(profile) {
 
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
   return fullName || profile.familyName || profile.email || "Unbekannt";
+}
+
+function mergeBookings(bookings = []) {
+  const merged = new Map();
+  bookings.forEach((booking) => {
+    if (!booking?.homeId || !booking.start || !booking.end) {
+      return;
+    }
+    merged.set(booking.requestId ?? booking.id, booking);
+  });
+  return Array.from(merged.values()).sort((first, second) => first.start.localeCompare(second.start));
 }
 
 function getHomePhotos(home) {
@@ -215,6 +235,7 @@ function App() {
         (availabilities) => setState((current) => ({ ...current, availabilities })),
         handleError,
       ),
+      subscribeCollection("bookings", (bookings) => setState((current) => ({ ...current, bookings })), handleError),
     ];
 
     return () => {
@@ -271,13 +292,23 @@ function App() {
     return state.homes.filter((home) => home.ownerId === currentProfile.id || home.managedBy === currentProfile.id);
   }, [currentProfile, state.homes]);
 
+  const acceptedBookings = useMemo(
+    () => mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]),
+    [state.bookings, state.requests],
+  );
+
+  const bookableAvailabilities = useMemo(
+    () => getBookableAvailabilities(state.availabilities, acceptedBookings),
+    [acceptedBookings, state.availabilities],
+  );
+
   const matches = useMemo(() => {
     if (!currentProfile) {
       return [];
     }
 
-    return findMatches(state.availabilities, state.homes, currentProfile.id);
-  }, [currentProfile, state.availabilities, state.homes]);
+    return findMatches(state.availabilities, state.homes, currentProfile.id, acceptedBookings);
+  }, [acceptedBookings, currentProfile, state.availabilities, state.homes]);
 
   const visibleRequests = useMemo(() => {
     if (!currentProfile) {
@@ -306,14 +337,11 @@ function App() {
       const dateMatch =
         !travelStart ||
         !travelEnd ||
-        state.availabilities.some(
-          (availability) =>
-            availability.homeId === home.id && availability.start <= travelEnd && availability.end >= travelStart,
-        );
+        isRangeBookable(home.id, travelStart, travelEnd, state.availabilities, acceptedBookings);
 
       return textMatch && guestMatch && dateMatch;
     });
-  }, [minGuests, query, state.availabilities, state.homes, travelEnd, travelStart]);
+  }, [acceptedBookings, minGuests, query, state.availabilities, state.homes, travelEnd, travelStart]);
 
   function updateState(updater) {
     setState((current) => {
@@ -493,6 +521,16 @@ function App() {
     try {
       setFirebaseError("");
       const targetHome = state.homes.find((home) => home.id === draft.homeId);
+      if (!targetHome) {
+        setFirebaseError("Diese Unterkunft wurde nicht gefunden.");
+        return;
+      }
+
+      if (!isRangeBookable(draft.homeId, draft.start, draft.end, state.availabilities, acceptedBookings)) {
+        setFirebaseError("Dieser Zeitraum ist nicht mehr verfuegbar. Bitte waehle freie Tage aus.");
+        return;
+      }
+
       const request = {
         id: createId("request"),
         fromUserId: currentProfile.id,
@@ -523,10 +561,40 @@ function App() {
   async function updateRequestStatus(id, status) {
     try {
       setFirebaseError("");
+      const existing = state.requests.find((request) => request.id === id);
+      if (!existing) {
+        setFirebaseError("Diese Anfrage wurde nicht gefunden.");
+        return;
+      }
+
+      if (
+        status === "accepted" &&
+        !isRangeBookable(
+          existing.homeId,
+          existing.start,
+          existing.end,
+          state.availabilities,
+          acceptedBookings.filter((booking) => booking.requestId !== id),
+        )
+      ) {
+        setFirebaseError("Dieser Zeitraum ist inzwischen gebucht oder nicht mehr frei.");
+        return;
+      }
+
+      const nextRequest = { ...existing, status };
       await patchRecord("exchangeRequests", id, { status });
+      if (status === "accepted") {
+        await saveRecord("bookings", bookingFromRequest(nextRequest));
+      } else {
+        await removeRecord("bookings", `booking-${id}`);
+      }
       updateState((current) => ({
         ...current,
         requests: current.requests.map((request) => (request.id === id ? { ...request, status } : request)),
+        bookings:
+          status === "accepted"
+            ? mergeBookings([...(current.bookings ?? []).filter((booking) => booking.requestId !== id), bookingFromRequest(nextRequest)])
+            : (current.bookings ?? []).filter((booking) => booking.requestId !== id),
       }));
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
@@ -540,12 +608,43 @@ function App() {
         ...updates,
         guests: Number(updates.guests),
       };
+      const existing = state.requests.find((request) => request.id === id);
+      if (!existing) {
+        setFirebaseError("Diese Anfrage wurde nicht gefunden.");
+        return;
+      }
+
+      const nextRequest = { ...existing, ...normalized };
+
+      if (
+        nextRequest.status === "accepted" &&
+        !isRangeBookable(
+          nextRequest.homeId,
+          nextRequest.start,
+          nextRequest.end,
+          state.availabilities,
+          acceptedBookings.filter((booking) => booking.requestId !== id),
+        )
+      ) {
+        setFirebaseError("Dieser Zeitraum ist inzwischen gebucht oder nicht mehr frei.");
+        return;
+      }
+
       await patchRecord("exchangeRequests", id, normalized);
+      if (nextRequest.status === "accepted") {
+        await saveRecord("bookings", bookingFromRequest(nextRequest));
+      } else {
+        await removeRecord("bookings", `booking-${id}`);
+      }
       updateState((current) => ({
         ...current,
         requests: current.requests.map((request) =>
           request.id === id ? { ...request, ...normalized } : request,
         ),
+        bookings:
+          nextRequest.status === "accepted"
+            ? mergeBookings([...(current.bookings ?? []).filter((booking) => booking.requestId !== id), bookingFromRequest(nextRequest)])
+            : (current.bookings ?? []).filter((booking) => booking.requestId !== id),
       }));
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
@@ -555,10 +654,18 @@ function App() {
   async function deleteRequest(id) {
     try {
       setFirebaseError("");
+      const existing = state.requests.find((request) => request.id === id);
       await removeRecord("exchangeRequests", id);
+      const shouldDeleteBooking = currentProfile.isAdmin && existing?.status === "accepted";
+      if (shouldDeleteBooking) {
+        await removeRecord("bookings", `booking-${id}`);
+      }
       updateState((current) => ({
         ...current,
         requests: current.requests.filter((request) => request.id !== id),
+        bookings: shouldDeleteBooking
+          ? (current.bookings ?? []).filter((booking) => booking.requestId !== id)
+          : current.bookings ?? [],
       }));
     } catch (error) {
       setFirebaseError(formatFirebaseError(error));
@@ -728,7 +835,7 @@ function App() {
             currentProfile={currentProfile}
             ownedHomes={ownedHomes}
             homes={state.homes}
-            availabilities={state.availabilities}
+            availabilities={bookableAvailabilities}
             requests={visibleRequests}
             openRequests={openRequests}
             matches={matches}
@@ -742,6 +849,8 @@ function App() {
           <DiscoverView
             homes={filteredHomes}
             allAvailabilities={state.availabilities}
+            bookableAvailabilities={bookableAvailabilities}
+            bookings={acceptedBookings}
             currentProfile={currentProfile}
             query={query}
             setQuery={setQuery}
@@ -762,6 +871,7 @@ function App() {
           <CalendarView
             homes={ownedHomes}
             availabilities={state.availabilities.filter((entry) => ownedHomes.some((home) => home.id === entry.homeId))}
+            bookings={acceptedBookings.filter((booking) => ownedHomes.some((home) => home.id === booking.homeId))}
             onSave={saveAvailability}
             onDelete={deleteAvailability}
           />
@@ -797,13 +907,21 @@ function App() {
       </main>
 
       {requestDraft && (
-        <RequestPanel draft={requestDraft} home={state.homes.find((home) => home.id === requestDraft.homeId)} onClose={() => setRequestDraft(null)} onSubmit={createRequest} />
+        <RequestPanel
+          draft={requestDraft}
+          home={state.homes.find((home) => home.id === requestDraft.homeId)}
+          availabilities={state.availabilities}
+          bookings={acceptedBookings}
+          onClose={() => setRequestDraft(null)}
+          onSubmit={createRequest}
+        />
       )}
       {selectedHomeId && (
         <HomeDetailPanel
           home={state.homes.find((home) => home.id === selectedHomeId)}
           owner={state.profiles.find((profile) => profile.id === state.homes.find((home) => home.id === selectedHomeId)?.ownerId)}
           availabilities={state.availabilities.filter((availability) => availability.homeId === selectedHomeId)}
+          bookings={acceptedBookings.filter((booking) => booking.homeId === selectedHomeId)}
           disabled={state.homes.find((home) => home.id === selectedHomeId)?.ownerId === currentProfile.id}
           onClose={() => setSelectedHomeId(null)}
           onRequest={(draft) => {
@@ -1097,7 +1215,7 @@ function DashboardMetric({ label, value }) {
   );
 }
 
-function DateRow({ title, subtitle, start, end }) {
+function DateRow({ title, subtitle, start, end, status }) {
   const date = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "short" }).format(new Date(start));
 
   return (
@@ -1106,16 +1224,36 @@ function DateRow({ title, subtitle, start, end }) {
         {date}
       </div>
       <div>
-        <strong>{title}</strong>
+        <div className="flex flex-wrap items-center gap-2">
+          <strong>{title}</strong>
+          {status && <AvailabilityStatePill status={status} />}
+        </div>
         <p className="mt-1 text-sm text-[#66756d]">{subtitle} · {formatDateRange(start, end)}</p>
       </div>
     </div>
   );
 }
 
+function AvailabilityStatePill({ status }) {
+  const labels = {
+    free: "Frei",
+    partial: "Teilweise gebucht",
+    booked: "Gebucht",
+  };
+  const tones = {
+    free: "green",
+    partial: "amber",
+    booked: "red",
+  };
+
+  return <Pill tone={tones[status] ?? "neutral"}>{labels[status] ?? status}</Pill>;
+}
+
 function DiscoverView({
   homes,
   allAvailabilities,
+  bookableAvailabilities,
+  bookings,
   currentProfile,
   query,
   setQuery,
@@ -1137,24 +1275,33 @@ function DiscoverView({
         <FieldCompact label="Bis" type="date" value={travelEnd} onChange={setTravelEnd} />
       </Toolbar>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {homes.map((home) => (
-          <HomeCard
-            key={home.id}
-            home={home}
-            availabilities={allAvailabilities.filter((availability) => availability.homeId === home.id)}
-            disabled={home.ownerId === currentProfile.id}
-            onDetails={() => onDetails(home.id)}
-            onRequest={() =>
-              onRequest({
-                homeId: home.id,
-                start: travelStart || allAvailabilities.find((availability) => availability.homeId === home.id)?.start || "",
-                end: travelEnd || allAvailabilities.find((availability) => availability.homeId === home.id)?.end || "",
-                guests: Math.min(4, home.maxGuests),
-                message: "",
-              })
-            }
-          />
-        ))}
+        {homes.map((home) => {
+          const homeBookableAvailabilities = bookableAvailabilities.filter(
+            (availability) => availability.homeId === home.id,
+          );
+          const fallbackAvailability = homeBookableAvailabilities[0];
+
+          return (
+            <HomeCard
+              key={home.id}
+              home={home}
+              availabilities={allAvailabilities.filter((availability) => availability.homeId === home.id)}
+              bookableAvailabilities={homeBookableAvailabilities}
+              bookings={bookings.filter((booking) => booking.homeId === home.id)}
+              disabled={home.ownerId === currentProfile.id}
+              onDetails={() => onDetails(home.id)}
+              onRequest={() =>
+                onRequest({
+                  homeId: home.id,
+                  start: travelStart || fallbackAvailability?.start || "",
+                  end: travelEnd || fallbackAvailability?.end || "",
+                  guests: Math.min(4, home.maxGuests),
+                  message: "",
+                })
+              }
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -1197,8 +1344,9 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
   );
 }
 
-function CalendarView({ homes, availabilities, onSave, onDelete }) {
+function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
   const [form, setForm] = useState({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
+  const sortedBookings = [...bookings].sort((first, second) => first.start.localeCompare(second.start));
 
   return (
     <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
@@ -1236,7 +1384,10 @@ function CalendarView({ homes, availabilities, onSave, onDelete }) {
           {availabilities.map((availability) => (
             <div key={availability.id} className="flex flex-col gap-3 rounded-lg bg-white p-4 shadow-soft sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <strong>{availability.title}</strong>
+                <div className="flex flex-wrap items-center gap-2">
+                  <strong>{availability.title}</strong>
+                  <AvailabilityStatePill status={getAvailabilityBookingState(availability, bookings)} />
+                </div>
                 <p className="text-sm text-[#66756d]">{homes.find((home) => home.id === availability.homeId)?.title} · {formatDateRange(availability.start, availability.end)}</p>
               </div>
               <IconButton label="Zeitraum loeschen" onClick={() => onDelete(availability.id)}>
@@ -1244,6 +1395,20 @@ function CalendarView({ homes, availabilities, onSave, onDelete }) {
               </IconButton>
             </div>
           ))}
+        </div>
+        <h2 className="mb-3 mt-6 text-xl font-bold">Gebuchte Zeitraeume</h2>
+        <div className="grid gap-3">
+          {sortedBookings.map((booking) => (
+            <DateRow
+              key={booking.id}
+              title="Gebucht"
+              subtitle={homes.find((home) => home.id === booking.homeId)?.title ?? "Unterkunft"}
+              start={booking.start}
+              end={booking.end}
+              status="booked"
+            />
+          ))}
+          {!sortedBookings.length && <EmptyState title="Noch keine Buchungen" text="Angenommene Anfragen erscheinen hier automatisch." />}
         </div>
       </section>
     </div>
@@ -1451,8 +1616,10 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
   );
 }
 
-function HomeCard({ home, availabilities, disabled, onDetails, onRequest }) {
+function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disabled, onDetails, onRequest }) {
   const [showMap, setShowMap] = useState(false);
+  const requestDisabled = disabled || !bookableAvailabilities.length;
+  const nextBooking = bookings[0];
 
   return (
     <article className="group overflow-hidden rounded-lg border border-white bg-white shadow-soft transition hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(32,45,54,0.16)]">
@@ -1461,6 +1628,7 @@ function HomeCard({ home, availabilities, disabled, onDetails, onRequest }) {
         <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent" />
         <div className="absolute left-3 top-3 flex gap-2">
           {home.isExternal && <Pill tone="amber">Extern</Pill>}
+          {nextBooking && <Pill tone="red">Gebucht</Pill>}
         </div>
         <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3 text-white">
           <div>
@@ -1484,10 +1652,18 @@ function HomeCard({ home, availabilities, disabled, onDetails, onRequest }) {
         <div className="mt-4 space-y-2">
           {availabilities.slice(0, 2).map((availability) => (
             <div key={availability.id} className="rounded-lg border border-[#dfe8dc] bg-[#f6f8f3] px-3 py-2 text-sm">
-              <strong>{availability.title}</strong>
+              <div className="flex flex-wrap items-center gap-2">
+                <strong>{availability.title}</strong>
+                <AvailabilityStatePill status={getAvailabilityBookingState(availability, bookings)} />
+              </div>
               <span className="ml-2 text-[#66756d]">{formatDateRange(availability.start, availability.end)}</span>
             </div>
           ))}
+          {bookableAvailabilities.length > 0 && bookings.length > 0 && (
+            <div className="rounded-lg border border-[#dfe8dc] bg-white px-3 py-2 text-sm text-[#4f5d55]">
+              Noch frei: {formatDateRange(bookableAvailabilities[0].start, bookableAvailabilities[0].end)}
+            </div>
+          )}
           {!availabilities.length && (
             <div className="rounded-lg border border-dashed border-[#d9dfd5] px-3 py-2 text-sm text-[#66756d]">
               Noch keine freien Zeitraeume
@@ -1511,17 +1687,17 @@ function HomeCard({ home, availabilities, disabled, onDetails, onRequest }) {
         {showMap && <MapPreview home={home} />}
         <button
           className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
-          disabled={disabled}
+          disabled={requestDisabled}
           onClick={onRequest}
         >
-          <Send size={17} /> {disabled ? "Eigenes Haus" : "Tausch anfragen"}
+          <Send size={17} /> {disabled ? "Eigenes Haus" : bookableAvailabilities.length ? "Tausch anfragen" : "Nicht verfuegbar"}
         </button>
       </div>
     </article>
   );
 }
 
-function HomeDetailPanel({ home, owner, availabilities, disabled, onClose, onRequest }) {
+function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onClose, onRequest }) {
   const photos = getHomePhotos(home);
   const initialIndex = Math.min(Math.max(Number(home?.coverPhotoIndex ?? 0), 0), Math.max(photos.length - 1, 0));
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(initialIndex);
@@ -1532,6 +1708,8 @@ function HomeDetailPanel({ home, owner, availabilities, disabled, onClose, onReq
 
   const selectedPhoto = photos[selectedPhotoIndex] ?? getHomeCoverPhoto(home);
   const selectedCaption = getPhotoCaption(home, selectedPhotoIndex);
+  const bookableAvailabilities = getBookableAvailabilities(availabilities, bookings);
+  const requestDisabled = disabled || !bookableAvailabilities.length;
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/45 p-3 sm:place-items-center">
@@ -1606,33 +1784,50 @@ function HomeDetailPanel({ home, owner, availabilities, disabled, onClose, onReq
               </p>
               <button
                 className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 font-semibold text-white disabled:bg-[#b7bdb8]"
-                disabled={disabled}
+                disabled={requestDisabled}
                 onClick={() =>
                   onRequest({
                     homeId: home.id,
-                    start: availabilities[0]?.start ?? "",
-                    end: availabilities[0]?.end ?? "",
+                    start: bookableAvailabilities[0]?.start ?? "",
+                    end: bookableAvailabilities[0]?.end ?? "",
                     guests: Math.min(4, home.maxGuests),
                     message: "",
                   })
                 }
               >
-                <Send size={18} /> {disabled ? "Eigenes Haus" : "Tausch anfragen"}
+                <Send size={18} /> {disabled ? "Eigenes Haus" : bookableAvailabilities.length ? "Tausch anfragen" : "Nicht verfuegbar"}
               </button>
             </div>
             <div className="rounded-lg border border-[#edf0ea] p-4">
               <h3 className="text-lg font-bold">Freie Zeitraeume</h3>
               <div className="mt-3 space-y-2">
-                {availabilities.map((availability) => (
+                {bookableAvailabilities.map((availability) => (
                   <DateRow
                     key={availability.id}
                     title={availability.title}
                     subtitle={home.title}
                     start={availability.start}
                     end={availability.end}
+                    status="free"
                   />
                 ))}
-                {!availabilities.length && <EmptyState title="Keine Zeitraeume" text="Fuer dieses Haus sind noch keine freien Zeitraeume eingetragen." />}
+                {!bookableAvailabilities.length && <EmptyState title="Nicht verfuegbar" text="Fuer dieses Haus sind aktuell keine freien Tage uebrig." />}
+              </div>
+            </div>
+            <div className="rounded-lg border border-[#edf0ea] p-4">
+              <h3 className="text-lg font-bold">Gebuchte Zeitraeume</h3>
+              <div className="mt-3 space-y-2">
+                {bookings.map((booking) => (
+                  <DateRow
+                    key={booking.id}
+                    title="Gebucht"
+                    subtitle={home.title}
+                    start={booking.start}
+                    end={booking.end}
+                    status="booked"
+                  />
+                ))}
+                {!bookings.length && <EmptyState title="Keine Buchungen" text="Angenommene Anfragen blockieren hier automatisch die Tage." />}
               </div>
             </div>
             <MapPreview home={home} />
@@ -1901,8 +2096,10 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
   );
 }
 
-function RequestPanel({ draft, home, onClose, onSubmit }) {
+function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit }) {
   const [form, setForm] = useState(draft);
+  const datesEntered = Boolean(form.homeId && form.start && form.end);
+  const bookable = !datesEntered || isRangeBookable(form.homeId, form.start, form.end, availabilities, bookings);
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/35 p-3 sm:place-items-center">
@@ -1927,11 +2124,16 @@ function RequestPanel({ draft, home, onClose, onSubmit }) {
         </label>
         <button
           className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-4 font-semibold text-white disabled:opacity-50"
-          disabled={!form.start || !form.end || !form.guests}
+          disabled={!form.start || !form.end || !form.guests || !bookable}
           onClick={() => onSubmit(form)}
         >
           <Send size={18} /> Anfrage senden
         </button>
+        {!bookable && (
+          <p className="mt-3 rounded-lg border border-[#f0d6a8] bg-[#fff5df] px-3 py-2 text-sm font-semibold text-[#75511a]">
+            Dieser Zeitraum ist bereits gebucht oder nicht als frei eingetragen.
+          </p>
+        )}
       </section>
     </div>
   );

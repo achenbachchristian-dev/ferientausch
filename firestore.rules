@@ -51,5 +51,13 @@ service cloud.firestore {
           && resource.data.status != "pending"
         );
     }
+
+    match /bookings/{bookingId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin()
+        || request.resource.data.toUserId == request.auth.uid;
+      allow delete: if isAdmin()
+        || resource.data.toUserId == request.auth.uid;
+    }
   }
 }
