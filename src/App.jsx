@@ -535,7 +535,7 @@ function App() {
       }
 
       if (!isRangeBookable(draft.homeId, draft.start, draft.end, state.availabilities, acceptedBookings)) {
-        setFirebaseError("Dieser Zeitraum ist nicht mehr verfuegbar. Bitte waehle freie Tage aus.");
+        setFirebaseError("Dieser Zeitraum ist nicht mehr verfügbar. Bitte wähle freie Tage aus.");
         return;
       }
 
@@ -551,7 +551,7 @@ function App() {
         messages: [
           {
             authorId: currentProfile.id,
-            text: draft.message || "Wir wuerden diesen Zeitraum gern tauschen.",
+            text: draft.message || "Wir würden diesen Zeitraum gern tauschen.",
             createdAt: new Date().toISOString(),
           },
         ],
@@ -764,7 +764,7 @@ function App() {
   }
 
   if (firebaseEnabled && !authChecked) {
-    return <LoadingScreen title="Firebase wird verbunden" text="Einen Moment, die Anmeldung wird geprueft." />;
+    return <LoadingScreen title="Firebase wird verbunden" text="Einen Moment, die Anmeldung wird geprüft." />;
   }
 
   if (!currentProfile) {
@@ -772,7 +772,7 @@ function App() {
       return (
         <LoadingScreen
           title="Profil wird geladen"
-          text="Falls diese Ansicht bleibt, pruefe die Firestore-Regeln und ob dein Profil-Dokument existiert."
+          text="Falls diese Ansicht bleibt, prüfe die Firestore-Regeln und ob dein Profil-Dokument existiert."
           error={firebaseError}
           onLogout={handleLogout}
         />
@@ -961,7 +961,7 @@ function AuthScreen({ authMode, error, onAuthModeChange, onSubmit, onAnonymous }
             <p className="mb-3 inline-flex rounded-lg bg-white/15 px-3 py-1 text-sm font-semibold backdrop-blur">Ferien im Haus von Freunden</p>
             <h1 className="max-w-2xl text-5xl font-bold tracking-normal sm:text-6xl">FerienTausch</h1>
             <p className="mt-4 max-w-xl text-lg leading-8 text-white/88">
-              Haeuser, freie Zeitraeume, Smart Matches und Tauschanfragen fuer euren privaten Familienkreis.
+              Häuser, freie Zeiträume, Smart Matches und Tauschanfragen für euren privaten Familienkreis.
             </p>
           </div>
           <form
@@ -1082,12 +1082,12 @@ function DashboardView({
       <section className="overflow-hidden rounded-lg bg-[#24313a] text-white shadow-soft">
         <div className="grid gap-5 p-5 md:grid-cols-[1.2fr_0.8fr] md:p-6">
           <div>
-            <p className="text-sm font-semibold text-[#c7d5c4]">Willkommen zurueck, {getProfileName(currentProfile)}</p>
+            <p className="text-sm font-semibold text-[#c7d5c4]">Willkommen zurück, {getProfileName(currentProfile)}</p>
             <h2 className="mt-2 max-w-2xl text-3xl font-bold tracking-normal">
-              Alles fuer euren naechsten Haustausch an einem Ort.
+              Alles für euren nächsten Haustausch an einem Ort.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-white/78">
-              Behalte freie Zeitraeume, passende Matches und offene Anfragen im Blick.
+              Behalte freie Zeiträume, passende Matches und offene Anfragen im Blick.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
               <DashboardAction icon={Home} label={firstOwnedHome ? "Mein Haus bearbeiten" : "Haus anlegen"} onClick={() => onNavigate("my-home")} />
@@ -1096,7 +1096,7 @@ function DashboardView({
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3 rounded-lg bg-white/8 p-3">
-            <DashboardMetric label="Haeuser" value={ownedHomes.length} />
+            <DashboardMetric label="Häuser" value={ownedHomes.length} />
             <DashboardMetric label="Offen" value={openRequests.length} />
             <DashboardMetric label="Matches" value={matches.length} />
           </div>
@@ -1108,7 +1108,7 @@ function DashboardView({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold">Aktuelle Matches</h2>
-              <p className="mt-1 text-sm text-[#66756d]">Zeitraeume mit mindestens drei passenden Tagen.</p>
+              <p className="mt-1 text-sm text-[#66756d]">Zeiträume mit mindestens drei passenden Tagen.</p>
             </div>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("matcher")}>
               Alle <ChevronRight size={17} />
@@ -1138,7 +1138,7 @@ function DashboardView({
                 </button>
               </div>
             ))}
-            {!matches.length && <EmptyState title="Noch keine Matches" text="Trage freie Zeitraeume ein, dann prueft der Smart Matcher automatisch passende Ueberschneidungen." />}
+            {!matches.length && <EmptyState title="Noch keine Matches" text="Trage freie Zeiträume ein, dann prüft der Smart Matcher automatisch passende Überschneidungen." />}
           </div>
         </div>
 
@@ -1149,7 +1149,7 @@ function DashboardView({
               <p className="mt-1 text-sm text-[#66756d]">Alles, was noch entschieden werden muss.</p>
             </div>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("requests")}>
-              Oeffnen <ChevronRight size={17} />
+              Öffnen <ChevronRight size={17} />
             </button>
           </div>
           <div className="mt-4 space-y-3">
@@ -1170,7 +1170,7 @@ function DashboardView({
 
       <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-lg bg-white p-4 shadow-soft">
-          <h2 className="text-xl font-bold">Naechste freie Zeitraeume</h2>
+          <h2 className="text-xl font-bold">Nächste freie Zeiträume</h2>
           <div className="mt-4 space-y-3">
             {nextAvailabilities.map((availability) => (
               <DateRow
@@ -1181,7 +1181,7 @@ function DashboardView({
                 end={availability.end}
               />
             ))}
-            {!nextAvailabilities.length && <EmptyState title="Noch keine Zeitraeume" text="Lege deinen ersten freien Zeitraum an." />}
+            {!nextAvailabilities.length && <EmptyState title="Noch keine Zeiträume" text="Lege deinen ersten freien Zeitraum an." />}
           </div>
         </div>
         <div className="rounded-lg bg-white p-4 shadow-soft">
@@ -1282,7 +1282,7 @@ function DiscoverView({
     <div className="space-y-5">
       <Toolbar>
         <SearchField value={query} onChange={setQuery} placeholder="Ort, Adresse oder Haus suchen" />
-        <FieldCompact label="Mind. Gaeste" type="number" value={minGuests} onChange={setMinGuests} />
+        <FieldCompact label="Mind. Gäste" type="number" value={minGuests} onChange={setMinGuests} />
         <FieldCompact label="Von" type="date" value={travelStart} onChange={setTravelStart} />
         <FieldCompact label="Bis" type="date" value={travelEnd} onChange={setTravelEnd} />
       </Toolbar>
@@ -1332,7 +1332,7 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
     <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold">Meine Unterkuenfte</h2>
+          <h2 className="text-xl font-bold">Meine Unterkünfte</h2>
           <IconButton
             label="Neue Unterkunft"
             onClick={() => setEditing({ ...blankHouse, id: createId("home"), ownerId: currentProfile.id, managedBy: currentProfile.id })}
@@ -1347,7 +1347,7 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
             onClick={() => setEditing(home)}
           >
             <strong>{home.title || "Neue Unterkunft"}</strong>
-            <p className="mt-1 text-sm text-[#66756d]">{home.city} · bis {home.maxGuests} Gaeste</p>
+            <p className="mt-1 text-sm text-[#66756d]">{home.city} · bis {home.maxGuests} Gäste</p>
           </button>
         ))}
       </section>
@@ -1391,7 +1391,7 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
         </div>
       </section>
       <section>
-        <h2 className="mb-3 text-xl font-bold">Eingetragene Zeitraeume</h2>
+        <h2 className="mb-3 text-xl font-bold">Eingetragene Zeiträume</h2>
         <div className="grid gap-3">
           {availabilities.map((availability) => (
             <div key={availability.id} className="flex flex-col gap-3 rounded-lg bg-white p-4 shadow-soft sm:flex-row sm:items-center sm:justify-between">
@@ -1402,13 +1402,13 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
                 </div>
                 <p className="text-sm text-[#66756d]">{homes.find((home) => home.id === availability.homeId)?.title} · {formatDateRange(availability.start, availability.end)}</p>
               </div>
-              <IconButton label="Zeitraum loeschen" onClick={() => onDelete(availability.id)}>
+              <IconButton label="Zeitraum löschen" onClick={() => onDelete(availability.id)}>
                 <Trash2 size={18} />
               </IconButton>
             </div>
           ))}
         </div>
-        <h2 className="mb-3 mt-6 text-xl font-bold">Gebuchte Zeitraeume</h2>
+        <h2 className="mb-3 mt-6 text-xl font-bold">Gebuchte Zeiträume</h2>
         <div className="grid gap-3">
           {sortedBookings.map((booking) => (
             <DateRow
@@ -1433,7 +1433,7 @@ function MatcherView({ matches, onRequest }) {
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <h2 className="text-2xl font-bold">Smart Matcher</h2>
-          <p className="mt-1 text-[#66756d]">Direkte Vorschlaege ab drei Tagen Ueberschneidung.</p>
+          <p className="mt-1 text-[#66756d]">Direkte Vorschläge ab drei Tagen Überschneidung.</p>
         </div>
         <Pill tone="green">{matches.length} Matches</Pill>
       </div>
@@ -1449,7 +1449,7 @@ function MatcherView({ matches, onRequest }) {
               <Sparkles className="text-[#d97706]" size={28} />
             </div>
             <p className="mt-4 text-sm leading-6 text-[#4f5d55]">
-              Eure Verfuegbarkeit "{match.myAvailability.title}" ueberschneidet sich mit "{match.targetAvailability.title}".
+              Eure Verfügbarkeit "{match.myAvailability.title}" überschneidet sich mit "{match.targetAvailability.title}".
             </p>
             <button
               className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-[#e05f4f] px-4 text-sm font-semibold text-white"
@@ -1468,7 +1468,7 @@ function MatcherView({ matches, onRequest }) {
           </article>
         ))}
       </div>
-      {!matches.length && <EmptyState title="Noch keine Ueberschneidung" text="Sobald mindestens drei gemeinsame Tage gefunden werden, erscheint hier ein Vorschlag." />}
+      {!matches.length && <EmptyState title="Noch keine Überschneidung" text="Sobald mindestens drei gemeinsame Tage gefunden werden, erscheint hier ein Vorschlag." />}
     </div>
   );
 }
@@ -1542,7 +1542,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
   return (
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-3">
-        <Metric label="Unterkuenfte" value={state.homes.length} />
+        <Metric label="Unterkünfte" value={state.homes.length} />
         <Metric label="Mitglieder" value={state.profiles.length} />
         <Metric label="Tauschanfragen" value={state.requests.length} />
       </div>
@@ -1584,7 +1584,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
                   <ShieldCheck size={17} /> {profile.isAdmin ? "Admin entfernen" : "Admin vergeben"}
                 </button>
                 {profile.id !== currentProfile.id && (
-                  <IconButton label="Profil loeschen" onClick={() => onDeleteProfile(profile.id)}>
+                  <IconButton label="Profil löschen" onClick={() => onDeleteProfile(profile.id)}>
                     <Trash2 size={18} />
                   </IconButton>
                 )}
@@ -1595,7 +1595,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
       </section>
       <section className="grid gap-5 lg:grid-cols-[1fr_1fr]">
         <div className="rounded-lg bg-white p-4 shadow-soft">
-          <h2 className="text-xl font-bold">Haus fuer Dritte eintragen</h2>
+          <h2 className="text-xl font-bold">Haus für Dritte eintragen</h2>
           <HouseEditor
             compact
             value={externalHome}
@@ -1608,7 +1608,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
           />
         </div>
         <div>
-          <h2 className="mb-3 text-xl font-bold">Alle Unterkuenfte</h2>
+          <h2 className="mb-3 text-xl font-bold">Alle Unterkünfte</h2>
           <div className="grid gap-3">
             {state.homes.map((home) => (
               <div key={home.id} className="flex items-center justify-between gap-3 rounded-lg bg-white p-3 shadow-soft">
@@ -1616,7 +1616,7 @@ function AdminView({ state, currentProfile, onSaveHome, onDeleteHome, onUploadPh
                   <strong>{home.title}</strong>
                   <p className="text-sm text-[#66756d]">{home.city} {home.isExternal ? "· extern gepflegt" : ""}</p>
                 </div>
-                <IconButton label="Unterkunft loeschen" onClick={() => onDeleteHome(home.id)}>
+                <IconButton label="Unterkunft löschen" onClick={() => onDeleteHome(home.id)}>
                   <Trash2 size={18} />
                 </IconButton>
               </div>
@@ -1653,7 +1653,7 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
       <div className="p-4">
         <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#4f5d55]">{home.description}</p>
         <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
-          <Fact icon={Users} label={`${home.maxGuests} Gaeste`} />
+          <Fact icon={Users} label={`${home.maxGuests} Gäste`} />
           <Fact icon={BedDouble} label={`${home.bedrooms} Schlafz.`} />
           <Fact icon={Bath} label={`${home.bathrooms} Bad`} />
         </div>
@@ -1678,7 +1678,7 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
           )}
           {!availabilities.length && (
             <div className="rounded-lg border border-dashed border-[#d9dfd5] px-3 py-2 text-sm text-[#66756d]">
-              Noch keine freien Zeitraeume
+              Noch keine freien Zeiträume
             </div>
           )}
         </div>
@@ -1702,7 +1702,7 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
           disabled={requestDisabled}
           onClick={onRequest}
         >
-          <Send size={17} /> {disabled ? "Eigenes Haus" : bookableAvailabilities.length ? "Tausch anfragen" : "Nicht verfuegbar"}
+          <Send size={17} /> {disabled ? "Eigenes Haus" : bookableAvailabilities.length ? "Tausch anfragen" : "Nicht verfügbar"}
         </button>
       </div>
     </article>
@@ -1753,7 +1753,7 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
                   <IconButton label="Vorheriges Bild" onClick={() => setSelectedPhotoIndex((current) => (current === 0 ? photos.length - 1 : current - 1))}>
                     <ArrowLeft size={18} />
                   </IconButton>
-                  <IconButton label="Naechstes Bild" onClick={() => setSelectedPhotoIndex((current) => (current + 1) % photos.length)}>
+                  <IconButton label="Nächstes Bild" onClick={() => setSelectedPhotoIndex((current) => (current + 1) % photos.length)}>
                     <ArrowRight size={18} />
                   </IconButton>
                 </div>
@@ -1791,7 +1791,7 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
           <aside className="space-y-4">
             <div className="rounded-lg border border-[#edf0ea] p-4">
               <div className="grid grid-cols-3 gap-2 text-sm">
-                <Fact icon={Users} label={`${home.maxGuests} Gaeste`} />
+                <Fact icon={Users} label={`${home.maxGuests} Gäste`} />
                 <Fact icon={BedDouble} label={`${home.bedrooms} Schlafz.`} />
                 <Fact icon={Bath} label={`${home.bathrooms} Bad`} />
               </div>
@@ -1811,11 +1811,11 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
                   })
                 }
               >
-                <Send size={18} /> {disabled ? "Eigenes Haus" : bookableAvailabilities.length ? "Tausch anfragen" : "Nicht verfuegbar"}
+                <Send size={18} /> {disabled ? "Eigenes Haus" : bookableAvailabilities.length ? "Tausch anfragen" : "Nicht verfügbar"}
               </button>
             </div>
             <div className="rounded-lg border border-[#edf0ea] p-4">
-              <h3 className="text-lg font-bold">Freie Zeitraeume</h3>
+              <h3 className="text-lg font-bold">Freie Zeiträume</h3>
               <div className="mt-3 space-y-2">
                 {bookableAvailabilities.map((availability) => (
                   <DateRow
@@ -1827,11 +1827,11 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
                     status="free"
                   />
                 ))}
-                {!bookableAvailabilities.length && <EmptyState title="Nicht verfuegbar" text="Fuer dieses Haus sind aktuell keine freien Tage uebrig." />}
+                {!bookableAvailabilities.length && <EmptyState title="Nicht verfügbar" text="Für dieses Haus sind aktuell keine freien Tage übrig." />}
               </div>
             </div>
             <div className="rounded-lg border border-[#edf0ea] p-4">
-              <h3 className="text-lg font-bold">Gebuchte Zeitraeume</h3>
+              <h3 className="text-lg font-bold">Gebuchte Zeiträume</h3>
               <div className="mt-3 space-y-2">
                 {bookings.map((booking) => (
                   <DateRow
@@ -1877,7 +1877,7 @@ function MapPreview({ home }) {
           target="_blank"
           rel="noreferrer"
         >
-          In Maps oeffnen
+          In Maps öffnen
         </a>
       </div>
       <iframe
@@ -1942,9 +1942,9 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
       </div>
       <FieldControlled label="Adresse" value={value.address} onChange={(address) => updateField("address", address)} />
       <div className="grid gap-3 sm:grid-cols-3">
-        <FieldControlled label="Max. Gaeste" type="number" value={value.maxGuests} onChange={(maxGuests) => updateField("maxGuests", maxGuests)} />
+        <FieldControlled label="Max. Gäste" type="number" value={value.maxGuests} onChange={(maxGuests) => updateField("maxGuests", maxGuests)} />
         <FieldControlled label="Schlafzimmer" type="number" value={value.bedrooms} onChange={(bedrooms) => updateField("bedrooms", bedrooms)} />
-        <FieldControlled label="Baeder" type="number" value={value.bathrooms} onChange={(bathrooms) => updateField("bathrooms", bathrooms)} />
+        <FieldControlled label="Bäder" type="number" value={value.bathrooms} onChange={(bathrooms) => updateField("bathrooms", bathrooms)} />
       </div>
       <label className="mt-3 block text-sm font-semibold">
         Beschreibung
@@ -1989,7 +1989,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
             <div>
               <p className="text-sm font-bold text-[#24313a]">Aktuelles Titelbild</p>
               <p className="mt-1 text-sm text-[#66756d]">
-                {coverPhoto ? coverCaption || `Bild ${coverPhotoIndex + 1}` : "Waehle ein Bild aus der Galerie als Titelbild aus."}
+                {coverPhoto ? coverCaption || `Bild ${coverPhotoIndex + 1}` : "Wähle ein Bild aus der Galerie als Titelbild aus."}
               </p>
               <p className="mt-2 text-xs font-semibold uppercase text-[#6e7a72]">
                 Dieses Bild erscheint auf Hauskarten, Dashboard und als erstes Bild in der Detailansicht.
@@ -2089,7 +2089,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
             <Plus size={18} /> URL
           </button>
           <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-[#24313a] px-3 font-semibold text-white">
-            <ImagePlus size={18} /> {uploadingPhoto ? "Laedt..." : "Upload"}
+            <ImagePlus size={18} /> {uploadingPhoto ? "Lädt..." : "Upload"}
             <input className="sr-only" type="file" accept="image/*" onChange={handleFile} />
           </label>
         </div>
@@ -2104,7 +2104,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
         </button>
         {onDelete && (
           <button className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#d8c4bd] bg-white px-4 font-semibold text-[#9f3f34]" onClick={() => onDelete(value.id)}>
-            <Trash2 size={18} /> Loeschen
+            <Trash2 size={18} /> Löschen
           </button>
         )}
       </div>
@@ -2215,12 +2215,12 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
             <button
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d8c4bd] px-3 text-sm font-semibold text-[#9f3f34]"
               onClick={() => {
-                if (window.confirm("Diese Tauschanfrage wirklich komplett loeschen?")) {
+                if (window.confirm("Diese Tauschanfrage wirklich komplett löschen?")) {
                   onDelete(request.id);
                 }
               }}
             >
-              <Trash2 size={17} /> Loeschen
+              <Trash2 size={17} /> Löschen
             </button>
           )}
           {incoming && request.status === "pending" && (
@@ -2285,7 +2285,7 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
                 setEditing(false);
               }}
             >
-              <Check size={17} /> Aenderungen speichern
+              <Check size={17} /> Änderungen speichern
             </button>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-4 text-sm font-semibold" onClick={() => setEditing(false)}>
               <X size={17} /> Abbrechen
@@ -2296,7 +2296,7 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
       <div className="mt-4 space-y-2">
         {request.messages.map((entry, index) => (
           <div key={`${entry.createdAt}-${index}`} className="rounded-lg bg-[#f6f8f3] p-3 text-sm">
-            <strong>{entry.authorId === currentProfile.id ? "Du" : "Gegenueber"}</strong>
+            <strong>{entry.authorId === currentProfile.id ? "Du" : "Gegenüber"}</strong>
             <p className="mt-1 text-[#4f5d55]">{entry.text}</p>
           </div>
         ))}
@@ -2432,7 +2432,7 @@ function formatFirebaseError(error) {
   const technicalDetail = code ? ` (${code})` : "";
 
   if (code.includes("permission-denied")) {
-    return `Firebase blockiert den Zugriff. Pruefe Firestore-Regeln und ob du angemeldet bist.${technicalDetail}`;
+    return `Firebase blockiert den Zugriff. Prüfe Firestore-Regeln und ob du angemeldet bist.${technicalDetail}`;
   }
 
   if (code.includes("auth/unauthorized-domain")) {
@@ -2440,7 +2440,7 @@ function formatFirebaseError(error) {
   }
 
   if (code.includes("auth/invalid-credential") || code.includes("auth/wrong-password")) {
-    return `Login fehlgeschlagen. Bitte E-Mail und Passwort pruefen.${technicalDetail}`;
+    return `Login fehlgeschlagen. Bitte E-Mail und Passwort prüfen.${technicalDetail}`;
   }
 
   if (code.includes("auth/email-already-in-use")) {
@@ -2451,7 +2451,7 @@ function formatFirebaseError(error) {
     return `Diese Login-Methode ist in Firebase Authentication noch nicht aktiviert.${technicalDetail}`;
   }
 
-  return error?.message ? `${error.message}${technicalDetail}` : `Firebase-Fehler. Bitte Konfiguration und Regeln pruefen.${technicalDetail}`;
+  return error?.message ? `${error.message}${technicalDetail}` : `Firebase-Fehler. Bitte Konfiguration und Regeln prüfen.${technicalDetail}`;
 }
 
 export default App;
