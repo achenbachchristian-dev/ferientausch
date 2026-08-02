@@ -24,10 +24,8 @@ export const amenityOptions = [
   "Barrierearm",
   "OePNV in der Naehe",
   "See in der Naehe",
-  "Skikeller",
   "Bergblick",
   "Strandnaehe",
-  "Home Cinema",
 ];
 
 export const demoProfiles = [
