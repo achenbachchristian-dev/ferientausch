@@ -23,7 +23,9 @@ import {
 import {
   auth,
   createUserWithEmailAndPassword,
+  firebaseConfigComplete,
   firebaseEnabled,
+  firebaseProjectId,
   onAuthStateChanged,
   signInAnonymously,
   signInWithEmailAndPassword,
@@ -486,7 +488,9 @@ function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Pill tone={firebaseEnabled ? "green" : "amber"}>{firebaseEnabled ? "Firebase aktiv" : "Demo-Modus"}</Pill>
+            <Pill tone={firebaseEnabled && firebaseConfigComplete ? "green" : "amber"}>
+              {firebaseEnabled ? `Firebase: ${firebaseProjectId}` : "Demo-Modus"}
+            </Pill>
             {currentProfile.isAdmin && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
                 <ShieldCheck size={18} /> Admin
@@ -518,6 +522,11 @@ function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        {firebaseEnabled && !firebaseConfigComplete && (
+          <FirebaseErrorBanner
+            message="Firebase-Konfiguration ist unvollstaendig. Bitte alle VITE_FIREBASE_ Variablen in Vercel pruefen und neu deployen."
+          />
+        )}
         {firebaseError && <FirebaseErrorBanner message={firebaseError} onDismiss={() => setFirebaseError("")} />}
         {activeTab === "discover" && (
           <DiscoverView
@@ -667,9 +676,11 @@ function FirebaseErrorBanner({ message, onDismiss }) {
   return (
     <div className="mb-4 flex flex-col gap-3 rounded-lg border border-[#d8b3aa] bg-[#fbe8e4] p-3 text-sm text-[#74342c] sm:flex-row sm:items-center sm:justify-between">
       <strong>{message}</strong>
-      <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 font-semibold" onClick={onDismiss}>
-        Schliessen
-      </button>
+      {onDismiss && (
+        <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 font-semibold" onClick={onDismiss}>
+          Schliessen
+        </button>
+      )}
     </div>
   );
 }
