@@ -12,7 +12,7 @@ import {
   collection,
   deleteDoc,
   doc,
-  getFirestore,
+  initializeFirestore,
   onSnapshot,
   query,
   setDoc,
@@ -42,7 +42,12 @@ export const firebaseConfigComplete = Boolean(
 
 const app = firebaseEnabled ? initializeApp(firebaseConfig) : null;
 export const auth = app ? getAuth(app) : null;
-export const db = app ? getFirestore(app) : null;
+export const db = app
+  ? initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      ignoreUndefinedProperties: true,
+    })
+  : null;
 
 export {
   addDoc,
