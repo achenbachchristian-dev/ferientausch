@@ -95,6 +95,7 @@ function App() {
   const [authChecked, setAuthChecked] = useState(!firebaseEnabled);
   const [firebaseError, setFirebaseError] = useState("");
   const [firebaseNotice, setFirebaseNotice] = useState("");
+  const [firebaseTestStatus, setFirebaseTestStatus] = useState("");
   const [activeTab, setActiveTab] = useState("discover");
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
@@ -469,23 +470,32 @@ function App() {
 
   async function runFirebaseWriteTest() {
     if (!firebaseEnabled || !currentProfile) {
+      setFirebaseTestStatus("Test nicht moeglich: kein Firebase-Profil geladen.");
       return;
     }
 
     try {
       setFirebaseError("");
+      setFirebaseTestStatus("Test laeuft...");
       const testedAt = new Date().toISOString();
-      await saveRecord("profiles", {
-        ...currentProfile,
-        diagnostics: {
-          lastWriteTestAt: testedAt,
-          projectId: firebaseProjectId,
-          uid: currentProfile.id,
-        },
-      });
+      await withTimeout(
+        saveRecord("profiles", {
+          ...currentProfile,
+          diagnostics: {
+            lastWriteTestAt: testedAt,
+            projectId: firebaseProjectId,
+            uid: currentProfile.id,
+          },
+        }),
+        8000,
+      );
+      const successMessage = `Gespeichert: profiles/${currentProfile.id}`;
       setFirebaseNotice(`Firebase-Test gespeichert: profiles/${currentProfile.id}`);
+      setFirebaseTestStatus(successMessage);
     } catch (error) {
-      setFirebaseError(formatFirebaseError(error));
+      const message = formatFirebaseError(error);
+      setFirebaseError(message);
+      setFirebaseTestStatus(message);
     }
   }
 
@@ -574,6 +584,7 @@ function App() {
                 <DatabaseZap size={18} /> Test
               </button>
             )}
+            {firebaseTestStatus && <Pill tone={firebaseTestStatus.startsWith("Gespeichert") ? "green" : "amber"}>{firebaseTestStatus}</Pill>}
             {currentProfile.isAdmin && (
               <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d5c4] bg-white px-3 text-sm font-semibold" onClick={() => setActiveTab("admin")}>
                 <ShieldCheck size={18} /> Admin
@@ -1416,6 +1427,15 @@ function fileToDataUrl(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function withTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error("Firebase antwortet nicht innerhalb von 8 Sekunden.")), timeoutMs);
+    }),
+  ]);
 }
 
 function formatFirebaseError(error) {
