@@ -10,6 +10,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  Pencil,
   Plus,
   Search,
   Send,
@@ -440,6 +441,25 @@ function App() {
     }
   }
 
+  async function saveRequestDetails(id, updates) {
+    try {
+      setFirebaseError("");
+      const normalized = {
+        ...updates,
+        guests: Number(updates.guests),
+      };
+      await patchRecord("exchangeRequests", id, normalized);
+      updateState((current) => ({
+        ...current,
+        requests: current.requests.map((request) =>
+          request.id === id ? { ...request, ...normalized } : request,
+        ),
+      }));
+    } catch (error) {
+      setFirebaseError(formatFirebaseError(error));
+    }
+  }
+
   async function addRequestMessage(id, text) {
     try {
       setFirebaseError("");
@@ -621,6 +641,7 @@ function App() {
             currentProfile={currentProfile}
             onStatus={updateRequestStatus}
             onMessage={addRequestMessage}
+            onSave={saveRequestDetails}
           />
         )}
         {activeTab === "profile" && <ProfileView profile={currentProfile} onSave={saveProfile} />}
@@ -922,7 +943,7 @@ function MatcherView({ matches, onRequest }) {
   );
 }
 
-function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onMessage }) {
+function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onMessage, onSave }) {
   const visibleRequests = requests.filter((request) => request.fromUserId === currentProfile.id || request.toUserId === currentProfile.id || currentProfile.isAdmin);
 
   return (
@@ -934,9 +955,12 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
           home={homes.find((home) => home.id === request.homeId)}
           from={profiles.find((profile) => profile.id === request.fromUserId)}
           to={profiles.find((profile) => profile.id === request.toUserId)}
+          homes={homes}
+          profiles={profiles}
           currentProfile={currentProfile}
           onStatus={onStatus}
           onMessage={onMessage}
+          onSave={onSave}
         />
       ))}
       {!visibleRequests.length && <EmptyState title="Keine Anfragen" text="Neue Tauschanfragen erscheinen hier mit Status und Nachrichtenverlauf." />}
@@ -1229,9 +1253,44 @@ function RequestPanel({ draft, home, onClose, onSubmit }) {
   );
 }
 
-function RequestCard({ request, home, from, to, currentProfile, onStatus, onMessage }) {
+function RequestCard({ request, home, from, to, homes, profiles, currentProfile, onStatus, onMessage, onSave }) {
   const [message, setMessage] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    homeId: request.homeId,
+    fromUserId: request.fromUserId,
+    toUserId: request.toUserId,
+    start: request.start,
+    end: request.end,
+    guests: request.guests,
+    status: request.status,
+  });
   const incoming = request.toUserId === currentProfile.id;
+  const canAdminEdit = currentProfile.isAdmin;
+
+  useEffect(() => {
+    if (!editing) {
+      setForm({
+        homeId: request.homeId,
+        fromUserId: request.fromUserId,
+        toUserId: request.toUserId,
+        start: request.start,
+        end: request.end,
+        guests: request.guests,
+        status: request.status,
+      });
+    }
+  }, [editing, request]);
+
+  function updateForm(field, value) {
+    if (field === "homeId") {
+      const selectedHome = homes.find((entry) => entry.id === value);
+      setForm({ ...form, homeId: value, toUserId: selectedHome?.ownerId ?? form.toUserId });
+      return;
+    }
+
+    setForm({ ...form, [field]: value });
+  }
 
   return (
     <article className="rounded-lg bg-white p-4 shadow-soft">
@@ -1243,17 +1302,82 @@ function RequestCard({ request, home, from, to, currentProfile, onStatus, onMess
             {formatDateRange(request.start, request.end)} · {request.guests} Personen · {getProfileName(from)} an {to ? getProfileName(to) : "extern"}
           </p>
         </div>
-        {incoming && request.status === "pending" && (
-          <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {canAdminEdit && (
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => setEditing((current) => !current)}>
+              <Pencil size={17} /> {editing ? "Schliessen" : "Bearbeiten"}
+            </button>
+          )}
+          {incoming && request.status === "pending" && (
+            <>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-3 text-sm font-semibold text-white" onClick={() => onStatus(request.id, "accepted")}>
               <Check size={17} /> Annehmen
             </button>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d8c4bd] px-3 text-sm font-semibold text-[#9f3f34]" onClick={() => onStatus(request.id, "declined")}>
               <X size={17} /> Ablehnen
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
+      {editing && canAdminEdit && (
+        <div className="mt-4 rounded-lg border border-[#dce3d8] bg-[#f8faf5] p-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <label className="block text-sm font-semibold">
+              Unterkunft
+              <select className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] bg-white px-3" value={form.homeId} onChange={(event) => updateForm("homeId", event.target.value)}>
+                {homes.map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.title}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm font-semibold">
+              Anfrage von
+              <select className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] bg-white px-3" value={form.fromUserId} onChange={(event) => updateForm("fromUserId", event.target.value)}>
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{getProfileName(profile)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm font-semibold">
+              Anfrage an
+              <select className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] bg-white px-3" value={form.toUserId} onChange={(event) => updateForm("toUserId", event.target.value)}>
+                {!profiles.some((profile) => profile.id === form.toUserId) && (
+                  <option value={form.toUserId}>{form.toUserId || "Extern"}</option>
+                )}
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{getProfileName(profile)}</option>
+                ))}
+              </select>
+            </label>
+            <FieldControlled label="Start" type="date" value={form.start} onChange={(start) => updateForm("start", start)} />
+            <FieldControlled label="Ende" type="date" value={form.end} onChange={(end) => updateForm("end", end)} />
+            <FieldControlled label="Personenanzahl" type="number" value={form.guests} onChange={(guests) => updateForm("guests", guests)} />
+            <label className="block text-sm font-semibold">
+              Status
+              <select className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] bg-white px-3" value={form.status} onChange={(event) => updateForm("status", event.target.value)}>
+                {Object.entries(statusLabels).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 text-sm font-semibold text-white"
+              onClick={() => {
+                onSave(request.id, form);
+                setEditing(false);
+              }}
+            >
+              <Check size={17} /> Aenderungen speichern
+            </button>
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-4 text-sm font-semibold" onClick={() => setEditing(false)}>
+              <X size={17} /> Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
       <div className="mt-4 space-y-2">
         {request.messages.map((entry, index) => (
           <div key={`${entry.createdAt}-${index}`} className="rounded-lg bg-[#f6f8f3] p-3 text-sm">
