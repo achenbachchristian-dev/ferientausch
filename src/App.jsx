@@ -1870,7 +1870,7 @@ function DashboardView({
       !nextAvailabilities.length && {
         id: "add-availability",
         title: "Freie Zeiträume eintragen",
-        text: "Mit aktuellen Angeboten findet der Smart Matcher passende Überschneidungen.",
+        text: "Mit aktuellen Zeiträumen findet der Smart Matcher freie Häuser in deiner Urlaubszeit.",
         icon: CalendarDays,
         label: "Zeitraum eintragen",
         onClick: () => onNavigate("calendar"),
@@ -1885,10 +1885,10 @@ function DashboardView({
     },
     matches.length > 0 && {
       id: "review-matches",
-      title: `${matches.length} Match${matches.length === 1 ? "" : "es"} ansehen`,
-      text: "Mindestens drei passende Tage überschneiden sich mit anderen Familien.",
+      title: `${matches.length} freie${matches.length === 1 ? "s Haus" : " Häuser"} in deiner Urlaubszeit`,
+      text: "Andere Familien haben Häuser frei, während dein eingetragener Zeitraum passt.",
       icon: Sparkles,
-      label: "Matches ansehen",
+      label: "Freie Häuser ansehen",
       onClick: () => onNavigate("matcher"),
     },
     profileIssues.length > 0 && {
@@ -1930,7 +1930,7 @@ function DashboardView({
           <div className="grid grid-cols-2 gap-3 bg-[#f8faf5] p-4 sm:grid-cols-4 lg:grid-cols-2">
             <DashboardMetric label="Eigene Häuser" value={ownedHomes.length} />
             <DashboardMetric label="Offen" value={openRequests.length} tone="dark" />
-            <DashboardMetric label="Matches" value={matches.length} tone="green" />
+            <DashboardMetric label="Freie Häuser" value={matches.length} tone="green" />
             <DashboardMetric label="Gebucht" value={acceptedRequests.length} tone="amber" />
           </div>
         </div>
@@ -1968,8 +1968,8 @@ function DashboardView({
         <div className="rounded-lg bg-white p-4 shadow-soft">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-bold">Aktuelle Matches</h2>
-              <p className="mt-1 text-sm text-[#66756d]">Zeiträume mit mindestens drei passenden Tagen.</p>
+              <h2 className="text-xl font-bold">Freie Häuser in deiner Urlaubszeit</h2>
+              <p className="mt-1 text-sm text-[#66756d]">Der Smart Matcher zeigt Häuser anderer Familien, die mindestens drei Tage zu deinem geplanten Zeitraum frei sind.</p>
             </div>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("matcher")}>
               Alle <ChevronRight size={17} />
@@ -1981,7 +1981,10 @@ function DashboardView({
                 <div>
                   <Pill tone="green">{match.overlap.days} Tage</Pill>
                   <h3 className="mt-2 font-bold">{match.targetHome.title}</h3>
-                  <p className="text-sm text-[#66756d]">{match.targetHome.region || match.targetHome.city} · {formatDateRange(match.overlap.start, match.overlap.end)}</p>
+                  <p className="text-sm text-[#66756d]">Frei in deiner Zeit: {formatDateRange(match.overlap.start, match.overlap.end)}</p>
+                  <p className="mt-1 text-xs font-semibold text-[#66756d]">
+                    Deine Planung: {match.myAvailability.title || formatDateRange(match.myAvailability.start, match.myAvailability.end)} · Ziel: {match.targetHome.region || match.targetHome.city}
+                  </p>
                 </div>
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-3 text-sm font-semibold text-white"
@@ -1991,7 +1994,7 @@ function DashboardView({
                       start: match.overlap.start,
                       end: match.overlap.end,
                       guests: Math.min(4, match.targetHome.maxGuests),
-                      message: `Unser Zeitraum passt ${match.overlap.days} Tage zu eurem Angebot.`,
+                      message: `Euer Haus ist ${match.overlap.days} Tage in unserer geplanten Urlaubszeit frei. Wir würden diesen Zeitraum gerne anfragen.`,
                     })
                   }
                 >
@@ -1999,7 +2002,7 @@ function DashboardView({
                 </button>
               </div>
             ))}
-            {!matches.length && <EmptyState title="Noch keine Matches" text="Trage freie Zeiträume ein, dann prüft der Smart Matcher automatisch passende Überschneidungen." />}
+            {!matches.length && <EmptyState title="Noch keine freien Häuser gefunden" text="Trage deine geplante Urlaubszeit im Kalender ein. Sobald ein anderes Haus in dieser Zeit frei ist, erscheint es hier." />}
           </div>
         </div>
 
@@ -2696,24 +2699,29 @@ function MatcherView({ matches, onRequest }) {
     <div className="space-y-4">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
-          <h2 className="text-2xl font-bold">Smart Matcher</h2>
-          <p className="mt-1 text-[#66756d]">Direkte Vorschläge ab drei Tagen Überschneidung.</p>
+          <h2 className="text-2xl font-bold">Freie Häuser in deiner geplanten Urlaubszeit</h2>
+          <p className="mt-1 text-[#66756d]">
+            Der Smart Matcher vergleicht deine eingetragenen Zeiträume mit freien Häusern anderer Familien. Angezeigt werden nur Häuser, die mindestens drei Tage in deiner Zeit verfügbar sind.
+          </p>
         </div>
-        <Pill tone="green">{matches.length} Matches</Pill>
+        <Pill tone="green">{matches.length} freie Häuser</Pill>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {matches.map((match) => (
           <article key={match.id} className="rounded-lg bg-white p-4 shadow-soft">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <Pill tone="green">{match.overlap.days} Tage</Pill>
+                <Pill tone="green">{match.overlap.days} freie Tage</Pill>
                 <h3 className="mt-3 text-xl font-bold">{match.targetHome.title}</h3>
-                <p className="mt-1 text-sm text-[#66756d]">{match.targetHome.city} · {formatDateRange(match.overlap.start, match.overlap.end)}</p>
+                <p className="mt-1 text-sm text-[#66756d]">
+                  {match.targetHome.region || match.targetHome.city} · frei vom {formatDateRange(match.overlap.start, match.overlap.end)}
+                </p>
               </div>
               <Sparkles className="text-[#d97706]" size={28} />
             </div>
             <p className="mt-4 text-sm leading-6 text-[#4f5d55]">
-              Eure Verfügbarkeit "{match.myAvailability.title}" überschneidet sich mit "{match.targetAvailability.title}".
+              Dieses Haus ist während deiner geplanten Zeit "{match.myAvailability.title || formatDateRange(match.myAvailability.start, match.myAvailability.end)}" frei.
+              Der passende Zeitraum ergibt sich aus dem Angebot "{match.targetAvailability.title || match.targetHome.title}".
             </p>
             <button
               className="mt-4 inline-flex h-10 items-center gap-2 rounded-lg bg-[#e05f4f] px-4 text-sm font-semibold text-white"
@@ -2723,7 +2731,7 @@ function MatcherView({ matches, onRequest }) {
                   start: match.overlap.start,
                   end: match.overlap.end,
                   guests: Math.min(4, match.targetHome.maxGuests),
-                  message: `Unser Zeitraum passt ${match.overlap.days} Tage zu eurem Angebot.`,
+                  message: `Euer Haus ist ${match.overlap.days} Tage in unserer geplanten Urlaubszeit frei. Wir würden diesen Zeitraum gerne anfragen.`,
                 })
               }
             >
@@ -2732,7 +2740,7 @@ function MatcherView({ matches, onRequest }) {
           </article>
         ))}
       </div>
-      {!matches.length && <EmptyState title="Noch keine Überschneidung" text="Sobald mindestens drei gemeinsame Tage gefunden werden, erscheint hier ein Vorschlag." />}
+      {!matches.length && <EmptyState title="Noch kein freies Haus in deiner Urlaubszeit" text="Lege im Kalender deine geplanten Reisezeiträume an. Sobald ein Haus aus dem Freundeskreis in dieser Zeit frei ist, erscheint es hier." />}
     </div>
   );
 }
