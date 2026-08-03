@@ -367,6 +367,48 @@ function getCalendarDayStatus(homeId, isoDate, availabilities = [], bookings = [
   return available ? "free" : "none";
 }
 
+function getRequestAcceptanceState(request, availabilities = [], bookings = []) {
+  if (!request?.homeId || !request.start || !request.end) {
+    return {
+      canAccept: false,
+      tone: "amber",
+      label: "Zeitraum prüfen",
+      detail: "Für diese Anfrage fehlen noch Haus oder Reisedaten.",
+    };
+  }
+
+  const activeBookings = bookings.filter((booking) => booking.requestId !== request.id);
+  const conflictingBookings = activeBookings.filter(
+    (booking) => booking.homeId === request.homeId && rangesOverlap(booking, request),
+  );
+  const canAccept = isRangeBookable(request.homeId, request.start, request.end, availabilities, activeBookings);
+
+  if (canAccept) {
+    return {
+      canAccept: true,
+      tone: "green",
+      label: "Zeitraum frei",
+      detail: "Diese Anfrage kann angenommen werden. Die Tage werden danach automatisch geblockt.",
+    };
+  }
+
+  if (conflictingBookings.length) {
+    return {
+      canAccept: false,
+      tone: "red",
+      label: "Buchungskonflikt",
+      detail: `Überschneidet sich mit ${conflictingBookings.length} bestehender Buchung.`,
+    };
+  }
+
+  return {
+    canAccept: false,
+    tone: "amber",
+    label: "Nicht freigegeben",
+    detail: "Der Zeitraum ist nicht vollständig als frei eingetragen oder wurde teilweise geblockt.",
+  };
+}
+
 function isValidDateRange(start, end) {
   return Boolean(start && end && start <= end);
 }
@@ -546,9 +588,11 @@ function App() {
   const [firebaseError, setFirebaseError] = useState("");
   const [appNotice, setAppNotice] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [showNotifications, setShowNotifications] = useState(false);
   const [authMode, setAuthMode] = useState("login");
   const [requestDraft, setRequestDraft] = useState(null);
   const [selectedHomeId, setSelectedHomeId] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
   const [query, setQuery] = useState("");
   const [minGuests, setMinGuests] = useState("");
   const [minBedrooms, setMinBedrooms] = useState("");
@@ -803,6 +847,84 @@ function App() {
     }
 
     return 0;
+  }
+
+  const inAppNotifications = useMemo(() => {
+    if (!currentProfile) {
+      return [];
+    }
+
+    const incomingRequests = visibleRequests
+      .filter((request) => request.toUserId === currentProfile.id && request.status === "pending")
+      .slice(0, 4)
+      .map((request) => ({
+        id: `incoming-${request.id}`,
+        tone: "amber",
+        title: "Neue Tauschanfrage",
+        text: `${state.homes.find((home) => home.id === request.homeId)?.title ?? "Unterkunft"} · ${formatDateRange(request.start, request.end)}`,
+        targetTab: "requests",
+      }));
+
+    const resolvedRequests = visibleRequests
+      .filter((request) => request.fromUserId === currentProfile.id && ["accepted", "declined"].includes(request.status))
+      .slice(0, 3)
+      .map((request) => ({
+        id: `resolved-${request.id}`,
+        tone: request.status === "accepted" ? "green" : "red",
+        title: request.status === "accepted" ? "Anfrage angenommen" : "Anfrage abgelehnt",
+        text: `${state.homes.find((home) => home.id === request.homeId)?.title ?? "Unterkunft"} · ${formatDateRange(request.start, request.end)}`,
+        targetTab: "requests",
+      }));
+
+    const adminNotifications = currentProfile.isAdmin
+      ? [
+          ...state.profiles
+            .filter((profile) => !isProfileApproved(profile))
+            .slice(0, 3)
+            .map((profile) => ({
+              id: `profile-${profile.id}`,
+              tone: "amber",
+              title: "Profil wartet auf Freigabe",
+              text: `${getProfileName(profile)} · ${profile.email || "ohne E-Mail"}`,
+              targetTab: "admin",
+              targetAdminSection: "members",
+            })),
+          ...(duplicateRequestGroups.length
+            ? [{
+                id: "duplicate-requests",
+                tone: "amber",
+                title: "Doppelte Anfragen gefunden",
+                text: `${duplicateRequestGroups.length} Gruppe(n) im Adminbereich prüfen.`,
+                targetTab: "admin",
+                targetAdminSection: "duplicates",
+              }]
+            : []),
+          ...(duplicateHomeGroups.length
+            ? [{
+                id: "duplicate-homes",
+                tone: "amber",
+                title: "Mögliche Haus-Duplikate",
+                text: `${duplicateHomeGroups.length} Gruppe(n) im Adminbereich prüfen.`,
+                targetTab: "admin",
+                targetAdminSection: "duplicates",
+              }]
+            : []),
+        ]
+      : [];
+
+    return [...incomingRequests, ...resolvedRequests, ...adminNotifications].slice(0, 10);
+  }, [currentProfile, duplicateHomeGroups, duplicateRequestGroups, state.homes, state.profiles, visibleRequests]);
+
+  function openInAppNotification(notification) {
+    if (notification.targetAdminSection) {
+      setAdminSection(notification.targetAdminSection);
+    }
+
+    if (notification.targetTab) {
+      setActiveTab(notification.targetTab);
+    }
+
+    setShowNotifications(false);
   }
 
   const filteredHomes = useMemo(() => {
@@ -1520,6 +1642,48 @@ function App() {
     }
   }
 
+  function confirmDeleteHome(id) {
+    const home = state.homes.find((entry) => entry.id === id);
+    const availabilityCount = state.availabilities.filter((availability) => availability.homeId === id).length;
+    setConfirmAction({
+      title: "Unterkunft löschen",
+      text: `"${home?.title ?? "Diese Unterkunft"}" wird inklusive ${availabilityCount} freier Zeitraum/Zeiträume und gespeicherter Fotos gelöscht.`,
+      confirmLabel: "Unterkunft löschen",
+      onConfirm: () => deleteHome(id),
+    });
+  }
+
+  function confirmDeleteProfile(id) {
+    const profile = state.profiles.find((entry) => entry.id === id);
+    const homeCount = state.homes.filter((home) => home.ownerId === id).length;
+    setConfirmAction({
+      title: "Profil löschen",
+      text: `${getProfileName(profile)} wird gelöscht. Zusätzlich werden ${homeCount} zugehörige Unterkunft(en) samt Zeiträumen entfernt.`,
+      confirmLabel: "Profil löschen",
+      onConfirm: () => deleteProfile(id),
+    });
+  }
+
+  function confirmDeleteRequest(id) {
+    const request = state.requests.find((entry) => entry.id === id);
+    const home = state.homes.find((entry) => entry.id === request?.homeId);
+    setConfirmAction({
+      title: "Tauschanfrage löschen",
+      text: `${home?.title ?? "Diese Anfrage"} · ${request ? formatDateRange(request.start, request.end) : "Zeitraum offen"} wird dauerhaft gelöscht.${request?.status === "accepted" && currentProfile?.isAdmin ? " Die dazugehörige Buchung wird ebenfalls entfernt." : ""}`,
+      confirmLabel: "Anfrage löschen",
+      onConfirm: () => deleteRequest(id),
+    });
+  }
+
+  function confirmDeleteRequests(ids = []) {
+    setConfirmAction({
+      title: "Doppelte Anfragen löschen",
+      text: `${ids.length} doppelte Anfrage(n) werden dauerhaft aus Firebase entfernt.`,
+      confirmLabel: "Duplikate löschen",
+      onConfirm: () => Promise.all(ids.map((id) => deleteRequest(id))),
+    });
+  }
+
   async function handleHomePhotoUpload(homeId, file) {
     try {
       setFirebaseError("");
@@ -1589,6 +1753,29 @@ function App() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <button
+                className="relative grid h-10 min-w-10 place-items-center rounded-lg border border-[#cfd7cd] bg-white px-2 text-[#24313a] hover:bg-[#edf1e8]"
+                aria-label="Benachrichtigungen"
+                title="Benachrichtigungen"
+                onClick={() => setShowNotifications((current) => !current)}
+                type="button"
+              >
+                <Bell size={18} />
+                {inAppNotifications.length > 0 && (
+                  <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e05f4f] px-1 text-[11px] font-bold text-white">
+                    {inAppNotifications.length > 9 ? "9+" : inAppNotifications.length}
+                  </span>
+                )}
+              </button>
+              {showNotifications && (
+                <NotificationMenu
+                  notifications={inAppNotifications}
+                  onOpen={openInAppNotification}
+                  onClose={() => setShowNotifications(false)}
+                />
+              )}
+            </div>
             <div className="flex items-center gap-2 rounded-lg bg-[#f8faf5] px-3 py-2">
               <img className="h-9 w-9 rounded-lg object-cover" src={getProfilePhoto(currentProfile)} alt="" />
               <div className="text-right">
@@ -1689,7 +1876,7 @@ function App() {
             bookings={acceptedBookings}
             currentProfile={currentProfile}
             onSave={upsertHome}
-            onDelete={deleteHome}
+            onDelete={confirmDeleteHome}
             onUploadPhoto={handleHomePhotoUpload}
           />
         )}
@@ -1717,11 +1904,13 @@ function App() {
             requests={uniqueRequests}
             homes={state.homes}
             profiles={state.profiles}
+            availabilities={state.availabilities}
+            bookings={acceptedBookings}
             currentProfile={currentProfile}
             onStatus={updateRequestStatus}
             onMessage={addRequestMessage}
             onSave={saveRequestDetails}
-            onDelete={deleteRequest}
+            onDelete={confirmDeleteRequest}
           />
         )}
         {activeTab === "profile" && <ProfileView profile={currentProfile} onSave={saveProfile} onUploadPhoto={handleProfilePhotoUpload} />}
@@ -1731,16 +1920,17 @@ function App() {
             rawRequests={state.requests}
             currentProfile={currentProfile}
             onSaveHome={upsertHome}
-            onDeleteHome={deleteHome}
+            onDeleteHome={confirmDeleteHome}
             onUploadPhoto={handleHomePhotoUpload}
             onSaveProfile={saveProfile}
             onToggleAdmin={toggleAdmin}
             onToggleApproval={toggleProfileApproval}
-            onDeleteProfile={deleteProfile}
+            onDeleteProfile={confirmDeleteProfile}
             onStatus={updateRequestStatus}
             onMessage={addRequestMessage}
             onSaveRequest={saveRequestDetails}
-            onDeleteRequest={deleteRequest}
+            onDeleteRequest={confirmDeleteRequest}
+            onDeleteRequests={confirmDeleteRequests}
             adminSection={adminSection}
             setAdminSection={setAdminSection}
             inviteCode={inviteCode}
@@ -1809,6 +1999,19 @@ function App() {
           onRequest={(draft) => {
             setRequestDraft(draft);
             setSelectedHomeId(null);
+          }}
+        />
+      )}
+      {confirmAction && (
+        <ConfirmDialog
+          title={confirmAction.title}
+          text={confirmAction.text}
+          confirmLabel={confirmAction.confirmLabel}
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={async () => {
+            const action = confirmAction;
+            setConfirmAction(null);
+            await action.onConfirm();
           }}
         />
       )}
@@ -1942,6 +2145,73 @@ function AppNoticeBanner({ message, onDismiss }) {
       <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 font-semibold" onClick={onDismiss}>
         Schliessen
       </button>
+    </div>
+  );
+}
+
+function NotificationMenu({ notifications, onOpen, onClose }) {
+  return (
+    <div className="absolute right-0 top-12 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-[#dce3d8] bg-white p-3 shadow-[0_22px_60px_rgba(32,45,54,0.18)]">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <strong>Benachrichtigungen</strong>
+        <button className="grid h-8 w-8 place-items-center rounded-lg hover:bg-[#f8faf5]" onClick={onClose} type="button" aria-label="Schliessen">
+          <X size={16} />
+        </button>
+      </div>
+      <div className="grid gap-2">
+        {notifications.map((notification) => (
+          <button
+            key={notification.id}
+            className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3 text-left hover:bg-[#edf1e8]"
+            onClick={() => onOpen(notification)}
+            type="button"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Pill tone={notification.tone}>{notification.title}</Pill>
+            </div>
+            <p className="mt-2 text-sm text-[#4f5d55]">{notification.text}</p>
+          </button>
+        ))}
+        {!notifications.length && (
+          <div className="rounded-lg border border-dashed border-[#dce3d8] bg-[#f8faf5] p-4 text-sm text-[#66756d]">
+            Keine neuen Hinweise.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDialog({ title, text, confirmLabel, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-end bg-black/45 p-3 sm:place-items-center">
+      <section className="w-full max-w-md rounded-lg bg-white p-5 shadow-soft">
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#fbe8e4] text-[#9f3f34]">
+            <Trash2 size={20} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold">{title}</h2>
+            <p className="mt-2 text-sm leading-6 text-[#66756d]">{text}</p>
+          </div>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-[#cfd7cd] bg-white px-4 text-sm font-semibold"
+            onClick={onCancel}
+            type="button"
+          >
+            Abbrechen
+          </button>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#9f3f34] px-4 text-sm font-semibold text-white"
+            onClick={onConfirm}
+            type="button"
+          >
+            <Trash2 size={17} /> {confirmLabel}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -2968,7 +3238,7 @@ function MatcherView({ matches, primaryResidenceHome, hasMultipleOwnHomes, onReq
   );
 }
 
-function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onMessage, onSave, onDelete }) {
+function RequestsView({ requests, homes, profiles, availabilities = [], bookings = [], currentProfile, onStatus, onMessage, onSave, onDelete }) {
   const [requestFilter, setRequestFilter] = useState("open");
   const visibleRequests = requests.filter((request) => request.fromUserId === currentProfile.id || request.toUserId === currentProfile.id || currentProfile.isAdmin);
   const sortedRequests = [...visibleRequests].sort((first, second) => {
@@ -3055,6 +3325,8 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
           to={profiles.find((profile) => profile.id === request.toUserId)}
           homes={homes}
           profiles={profiles}
+          availabilities={availabilities}
+          bookings={bookings}
           currentProfile={currentProfile}
           onStatus={onStatus}
           onMessage={onMessage}
@@ -3159,6 +3431,7 @@ function AdminView({
   onMessage,
   onSaveRequest,
   onDeleteRequest,
+  onDeleteRequests,
   adminSection,
   setAdminSection,
   inviteCode,
@@ -3277,10 +3550,11 @@ function AdminView({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 md:grid-cols-3">
-        <Metric label="Unterkünfte" value={state.homes.length} />
-        <Metric label="Mitglieder" value={state.profiles.length} />
-        <Metric label="Offene Aufgaben" value={adminTasks.length} />
+      <div className="grid gap-3 md:grid-cols-4">
+        <Metric label="Neue Nutzer" value={pendingProfiles.length} />
+        <Metric label="Offene Anfragen" value={openRequests.length} />
+        <Metric label="Duplikate" value={duplicateRequestGroups.length + duplicateHomeGroups.length} />
+        <Metric label="Häuser ohne Zeitraum" value={homesWithoutAvailability.length} />
       </div>
       <div className="flex gap-2 overflow-x-auto rounded-lg bg-white p-2 shadow-soft">
         {adminTabs.map((tab) => (
@@ -3296,7 +3570,7 @@ function AdminView({
           </button>
         ))}
       </div>
-      {adminSection === "overview" && <AdminTaskPanel tasks={adminTasks.slice(0, 6)} compact onOpenAll={() => setAdminSection("tasks")} />}
+      {adminSection === "overview" && <AdminTaskPanel tasks={adminTasks.slice(0, 8)} compact onOpenAll={() => setAdminSection("tasks")} />}
       {adminSection === "tasks" && <AdminTaskPanel tasks={adminTasks} />}
       {adminSection === "overview" && (
       <section className="rounded-lg bg-white p-4 shadow-soft">
@@ -3546,6 +3820,8 @@ function AdminView({
               to={state.profiles.find((profile) => profile.id === request.toUserId)}
               homes={state.homes}
               profiles={state.profiles}
+              availabilities={state.availabilities}
+              bookings={bookings}
               currentProfile={currentProfile}
               onStatus={onStatus}
               onMessage={onMessage}
@@ -3648,7 +3924,7 @@ function AdminView({
                         <button
                           className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-3 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
                           disabled={!duplicateRequests.length}
-                          onClick={() => duplicateRequests.forEach((request) => request.id && onDeleteRequest(request.id))}
+                          onClick={() => onDeleteRequests(duplicateRequests.map((request) => request.id).filter(Boolean))}
                           type="button"
                         >
                           <Trash2 size={17} /> Doppelte löschen
@@ -4509,7 +4785,7 @@ function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit
   );
 }
 
-function RequestCard({ request, home, from, to, homes, profiles, currentProfile, onStatus, onMessage, onSave, onDelete }) {
+function RequestCard({ request, home, from, to, homes, profiles, availabilities = [], bookings = [], currentProfile, onStatus, onMessage, onSave, onDelete }) {
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -4526,6 +4802,9 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
   const canDelete = currentProfile.isAdmin || (request.fromUserId === currentProfile.id && request.status !== "pending");
   const emailHref = requestEmailDraft(request, home, from, to);
   const openDays = request.status === "pending" ? getDaysSince(request.createdAt) : 0;
+  const acceptanceState = getRequestAcceptanceState(request, availabilities, bookings);
+  const formAcceptanceState = getRequestAcceptanceState({ ...request, ...form }, availabilities, bookings);
+  const saveDisabled = form.status === "accepted" && !formAcceptanceState.canAccept;
 
   useEffect(() => {
     if (!editing) {
@@ -4565,6 +4844,20 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
               Diese Anfrage ist seit {openDays} Tagen offen.
             </p>
           )}
+          {request.status === "pending" && (
+            <div className={`mt-2 rounded-lg border px-3 py-2 text-sm font-semibold ${
+              acceptanceState.canAccept
+                ? "border-[#b8d8b1] bg-[#e8f6e5] text-[#255c37]"
+                : acceptanceState.tone === "red"
+                  ? "border-[#d8b3aa] bg-[#fbe8e4] text-[#74342c]"
+                  : "border-[#f0d6a8] bg-[#fff5df] text-[#75511a]"
+            }`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Pill tone={acceptanceState.tone}>{acceptanceState.label}</Pill>
+                <span>{acceptanceState.detail}</span>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <a className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" href={emailHref}>
@@ -4578,18 +4871,19 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
           {canDelete && (
             <button
               className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d8c4bd] px-3 text-sm font-semibold text-[#9f3f34]"
-              onClick={() => {
-                if (window.confirm("Diese Tauschanfrage wirklich komplett löschen?")) {
-                  onDelete(request.id);
-                }
-              }}
+              onClick={() => onDelete(request.id)}
             >
               <Trash2 size={17} /> Löschen
             </button>
           )}
           {incoming && request.status === "pending" && (
             <>
-            <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-3 text-sm font-semibold text-white" onClick={() => onStatus(request.id, "accepted")}>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-3 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
+              disabled={!acceptanceState.canAccept}
+              onClick={() => onStatus(request.id, "accepted")}
+              title={acceptanceState.canAccept ? "Anfrage annehmen" : acceptanceState.detail}
+            >
               <Check size={17} /> Annehmen
             </button>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#d8c4bd] px-3 text-sm font-semibold text-[#9f3f34]" onClick={() => onStatus(request.id, "declined")}>
@@ -4641,9 +4935,15 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
               </select>
             </label>
           </div>
+          {saveDisabled && (
+            <p className="mt-3 rounded-lg border border-[#d8b3aa] bg-[#fbe8e4] px-3 py-2 text-sm font-semibold text-[#74342c]">
+              Annahme nicht möglich: {formAcceptanceState.detail}
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap gap-2">
             <button
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 text-sm font-semibold text-white"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
+              disabled={saveDisabled}
               onClick={() => {
                 onSave(request.id, form);
                 setEditing(false);
