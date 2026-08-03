@@ -185,6 +185,50 @@ function getHomeAvailabilityMode(homeId, bookableAvailabilities = [], bookings =
   return homeBookable.length ? "free" : "none";
 }
 
+function getNextAvailability(availabilities = []) {
+  const today = new Date().toISOString().slice(0, 10);
+  return [...availabilities]
+    .filter((availability) => availability.end >= today)
+    .sort((first, second) => first.start.localeCompare(second.start))[0];
+}
+
+function getHomeRequiredIssues(home) {
+  const issues = [];
+  if (!home.title?.trim()) issues.push("Titel fehlt");
+  if (!home.city?.trim()) issues.push("Ort fehlt");
+  if (!home.region?.trim()) issues.push("Region fehlt");
+  if (!Number(home.maxGuests) || Number(home.maxGuests) < 1) issues.push("Gästezahl fehlt");
+  if (!getHomePhotos(home).length) issues.push("Mindestens ein Bild fehlt");
+  if (!home.description?.trim() || home.description.trim().length < 25) issues.push("Beschreibung fehlt");
+  return issues;
+}
+
+function getHomeManagementStatus(home, availabilities = [], bookableAvailabilities = [], bookings = []) {
+  const requiredIssues = getHomeRequiredIssues(home);
+  const homeBookings = bookings.filter((booking) => booking.homeId === home.id);
+  const homeBookable = bookableAvailabilities.filter((availability) => availability.homeId === home.id);
+  const allHomeAvailabilities = availabilities.filter((availability) => availability.homeId === home.id);
+  const bookingStatus = getHomeBookingStatus(homeBookable, homeBookings);
+
+  if (requiredIssues.length) {
+    return { status: "incomplete", label: "Unvollständig", tone: "amber", detail: requiredIssues[0] };
+  }
+
+  if (bookingStatus === "booked") {
+    return { status: "booked", label: "Gebucht", tone: "red", detail: "Alle freigegebenen Tage sind gebucht." };
+  }
+
+  if (bookingStatus === "partial") {
+    return { status: "partial", label: "Teilweise gebucht", tone: "amber", detail: "Ein Teil der Tage ist bereits vergeben." };
+  }
+
+  if (!allHomeAvailabilities.length) {
+    return { status: "no-availability", label: "Keine Zeiträume", tone: "neutral", detail: "Noch keine freien Zeiten eingetragen." };
+  }
+
+  return { status: "published", label: "Öffentlich", tone: "green", detail: "Anfragbar im Freundeskreis." };
+}
+
 function getMonthDays(year, monthIndex) {
   const firstDate = new Date(year, monthIndex, 1);
   const startOffset = (firstDate.getDay() + 6) % 7;
@@ -1439,7 +1483,16 @@ function App() {
           />
         )}
         {activeTab === "my-home" && (
-          <MyHomeView homes={ownedHomes} currentProfile={currentProfile} onSave={upsertHome} onDelete={deleteHome} onUploadPhoto={handleHomePhotoUpload} />
+          <MyHomeView
+            homes={ownedHomes}
+            availabilities={state.availabilities}
+            bookableAvailabilities={bookableAvailabilities}
+            bookings={acceptedBookings}
+            currentProfile={currentProfile}
+            onSave={upsertHome}
+            onDelete={deleteHome}
+            onUploadPhoto={handleHomePhotoUpload}
+          />
         )}
         {activeTab === "calendar" && (
           <CalendarView
@@ -2139,6 +2192,15 @@ function DiscoverView({
           </label>
         </div>
       </div>
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div>
+          <h2 className="text-2xl font-bold">Entdecken</h2>
+          <p className="mt-1 text-sm text-[#66756d]">{homes.length} passende Unterkunft{homes.length === 1 ? "" : "en"} gefunden</p>
+        </div>
+        <Pill tone={availabilityMode === "available" ? "green" : "neutral"}>
+          {availabilityMode === "available" ? "Nur anfragbare Häuser" : "Alle Verfügbarkeiten"}
+        </Pill>
+      </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {homes.map((home) => {
           const homeBookableAvailabilities = bookableAvailabilities.filter(
@@ -2167,12 +2229,17 @@ function DiscoverView({
             />
           );
         })}
+        {!homes.length && (
+          <div className="md:col-span-2 xl:col-span-3">
+            <EmptyState title="Keine passenden Unterkünfte" text="Passe die Filter an oder entferne einzelne Ausstattungsmerkmale." />
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) {
+function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, currentProfile, onSave, onDelete, onUploadPhoto }) {
   const createHomeDraft = () => ({
     ...blankHouse,
     id: createId("home"),
@@ -2224,7 +2291,10 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
     <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold">Meine Unterkünfte</h2>
+          <div>
+            <h2 className="text-xl font-bold">Meine Unterkünfte</h2>
+            <p className="mt-1 text-sm text-[#66756d]">{homes.length} Unterkunft{homes.length === 1 ? "" : "en"} verwalten</p>
+          </div>
           <IconButton
             label="Neue Unterkunft"
             onClick={() => {
@@ -2246,19 +2316,33 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
             </div>
           </div>
         )}
-        {homes.map((home) => (
-          <button
-            key={home.id}
-            className={`w-full rounded-lg border p-3 text-left ${!isCreating && editing.id === home.id ? "border-[#2d6a62] bg-white" : "border-[#ded8cb] bg-white/70"}`}
-            onClick={() => {
-              setEditing(home);
-              setIsCreating(false);
-            }}
-          >
-            <strong>{home.title || "Neue Unterkunft"}</strong>
-            <p className="mt-1 text-sm text-[#66756d]">{home.region || home.city} · {home.city} · bis {home.maxGuests} Gäste</p>
-          </button>
-        ))}
+        {homes.map((home) => {
+          const homeBookableAvailabilities = bookableAvailabilities.filter((availability) => availability.homeId === home.id);
+          const status = getHomeManagementStatus(home, availabilities, bookableAvailabilities, bookings);
+          const nextAvailability = getNextAvailability(homeBookableAvailabilities);
+
+          return (
+            <button
+              key={home.id}
+              className={`w-full rounded-lg border p-3 text-left transition hover:bg-white ${!isCreating && editing.id === home.id ? "border-[#2d6a62] bg-white shadow-[0_0_0_2px_rgba(45,106,98,0.10)]" : "border-[#ded8cb] bg-white/70"}`}
+              onClick={() => {
+                setEditing(home);
+                setIsCreating(false);
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <strong>{home.title || "Neue Unterkunft"}</strong>
+                  <p className="mt-1 text-sm text-[#66756d]">{home.region || home.city || "Region offen"} · {home.city || "Ort offen"} · bis {home.maxGuests} Gäste</p>
+                </div>
+                <Pill tone={status.tone}>{status.label}</Pill>
+              </div>
+              <p className="mt-2 text-xs font-semibold text-[#66756d]">
+                {nextAvailability ? `Nächster Zeitraum: ${formatDateRange(nextAvailability.start, nextAvailability.end)}` : status.detail}
+              </p>
+            </button>
+          );
+        })}
       </section>
       <HouseEditor
         value={editing}
@@ -2284,6 +2368,12 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
   const calendarDays = getMonthDays(calendarYear, calendarMonthIndex);
   const selectedCalendarHomeId = form.homeId || homes[0]?.id || "";
   const selectedCalendarHome = homes.find((home) => home.id === selectedCalendarHomeId);
+  const selectedHomeAvailabilities = availabilities.filter((availability) => availability.homeId === selectedCalendarHomeId);
+  const selectedHomeBookableAvailabilities = getBookableAvailabilities(selectedHomeAvailabilities, bookings);
+  const selectedHomeStatus = selectedCalendarHome
+    ? getHomeManagementStatus(selectedCalendarHome, availabilities, selectedHomeBookableAvailabilities, bookings)
+    : null;
+  const selectedNextAvailability = getNextAvailability(selectedHomeBookableAvailabilities);
 
   function shiftMonth(offset) {
     const next = new Date(calendarYear, calendarMonthIndex + offset, 1);
@@ -2317,6 +2407,19 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
               ))}
             </select>
           </label>
+          {selectedHomeStatus && (
+            <div className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong>Status dieser Unterkunft</strong>
+                <Pill tone={selectedHomeStatus.tone}>{selectedHomeStatus.label}</Pill>
+              </div>
+              <p className="mt-1 text-sm text-[#66756d]">
+                {selectedNextAvailability
+                  ? `Nächster anfragbarer Zeitraum: ${formatDateRange(selectedNextAvailability.start, selectedNextAvailability.end)}`
+                  : selectedHomeStatus.detail}
+              </p>
+            </div>
+          )}
           <FieldControlled label="Titel" value={form.title} onChange={(title) => setForm({ ...form, title })} placeholder="Sommerferien Bayern" />
           <div className="grid gap-3 sm:grid-cols-2">
             <FieldControlled label="Start" type="date" value={form.start} onChange={(start) => setForm({ ...form, start })} />
@@ -2375,6 +2478,7 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-[#66756d]">
             <span className="rounded-lg bg-[#dcedd8] px-2 py-1 text-[#255c37]">Frei</span>
+            <span className="rounded-lg bg-[#f8e7bd] px-2 py-1 text-[#75511a]">Teilweise gebucht</span>
             <span className="rounded-lg bg-[#f4d3cd] px-2 py-1 text-[#8a332b]">Gebucht</span>
             <span className="rounded-lg bg-white px-2 py-1">Nicht freigegeben</span>
           </div>
@@ -3065,6 +3169,7 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
   const [showMap, setShowMap] = useState(false);
   const requestDisabled = disabled || !bookableAvailabilities.length;
   const homeBookingStatus = getHomeBookingStatus(bookableAvailabilities, bookings);
+  const nextBookableAvailability = getNextAvailability(bookableAvailabilities);
 
   return (
     <article className="group overflow-hidden rounded-lg border border-white bg-white shadow-soft transition hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(32,45,54,0.16)]">
@@ -3084,6 +3189,19 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
         </div>
       </div>
       <div className="p-4">
+        <div className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-bold text-[#24313a]">Nächster Zeitraum</span>
+            {nextBookableAvailability ? <Pill tone="green">Anfragbar</Pill> : <Pill tone="neutral">Nicht verfügbar</Pill>}
+          </div>
+          <p className="mt-1 text-sm text-[#66756d]">
+            {nextBookableAvailability
+              ? `${nextBookableAvailability.title || "Freier Zeitraum"} · ${formatDateRange(nextBookableAvailability.start, nextBookableAvailability.end)}`
+              : bookings.length
+                ? "Alle eingetragenen freien Tage sind bereits gebucht."
+                : "Noch kein freier Zeitraum eingetragen."}
+          </p>
+        </div>
         <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#4f5d55]">{home.description}</p>
         <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
           <Fact icon={Users} label={`${home.maxGuests} Gäste`} />
@@ -3401,12 +3519,25 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
   const coverPhoto = photos[coverPhotoIndex];
   const coverCaption = getPhotoCaption(value, coverPhotoIndex);
   const homeIssues = getHomeQualityIssues(value);
+  const requiredIssues = getHomeRequiredIssues(value);
   const homeScore = getCompletionScore(homeIssues, 8);
 
   return (
     <section className={compact ? "" : "rounded-lg bg-white p-5 shadow-soft"}>
       {!compact && <h2 className="mb-4 text-xl font-bold">{isNew ? "Neue Unterkunft anlegen" : "Unterkunft bearbeiten"}</h2>}
       <QualityMeter score={homeScore} issues={homeIssues} />
+      {!!requiredIssues.length && (
+        <div className="mb-4 rounded-lg border border-[#f0d2a0] bg-[#fff7e8] p-3 text-sm text-[#75511a]">
+          <strong>Zum Speichern bitte noch ergänzen:</strong>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {requiredIssues.map((issue) => (
+              <span key={issue} className="rounded-lg bg-white px-2 py-1 text-xs font-bold">
+                {issue}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <FieldControlled label="Titel" value={value.title} onChange={(title) => updateField("title", title)} />
         <FieldControlled label="Standort/Stadt" value={value.city} onChange={(city) => updateField("city", city)} />
@@ -3571,8 +3702,13 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
         <MapPreview home={value} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <button className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white" onClick={() => onSave(value)}>
-          <Check size={18} /> Speichern
+        <button
+          className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white disabled:bg-[#b7bdb8]"
+          disabled={!!requiredIssues.length}
+          onClick={() => onSave(value)}
+          type="button"
+        >
+          <Check size={18} /> {isNew ? "Unterkunft anlegen" : "Speichern"}
         </button>
         {onDelete && !isNew && (
           <button className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#d8c4bd] bg-white px-4 font-semibold text-[#9f3f34]" onClick={() => onDelete(value.id)}>
