@@ -1727,36 +1727,111 @@ function DashboardView({
     .filter((availability) => ownedHomeIds.has(availability.homeId))
     .sort((first, second) => first.start.localeCompare(second.start))
     .slice(0, 3);
-  const featuredHomes = homes.filter((home) => home.ownerId !== currentProfile.id).slice(0, 3);
+  const incomingRequests = openRequests.filter((request) => request.toUserId === currentProfile.id);
+  const outgoingRequests = openRequests.filter((request) => request.fromUserId === currentProfile.id);
+  const acceptedRequests = requests.filter((request) => request.status === "accepted");
+  const featuredHomes = homes
+    .filter((home) => home.ownerId !== currentProfile.id)
+    .slice(0, 3);
   const firstOwnedHome = ownedHomes[0];
+  const profileIssues = getProfileQualityIssues(currentProfile);
+  const primaryHomeIssues = firstOwnedHome ? getHomeQualityIssues(firstOwnedHome) : [];
+  const nextActions = [
+    !ownedHomes.length && {
+      id: "create-home",
+      title: "Erstes Haus anlegen",
+      text: "Ohne Unterkunft kann dich keine andere Familie für einen Tausch finden.",
+      icon: Home,
+      label: "Haus anlegen",
+      onClick: () => onNavigate("my-home"),
+    },
+    ownedHomes.length > 0 &&
+      !nextAvailabilities.length && {
+        id: "add-availability",
+        title: "Freie Zeiträume eintragen",
+        text: "Mit aktuellen Angeboten findet der Smart Matcher passende Überschneidungen.",
+        icon: CalendarDays,
+        label: "Zeitraum eintragen",
+        onClick: () => onNavigate("calendar"),
+      },
+    incomingRequests.length > 0 && {
+      id: "review-requests",
+      title: `${incomingRequests.length} Anfrage${incomingRequests.length === 1 ? "" : "n"} prüfen`,
+      text: "Diese Anfragen warten auf Annahme oder Ablehnung.",
+      icon: Mail,
+      label: "Anfragen öffnen",
+      onClick: () => onNavigate("requests"),
+    },
+    matches.length > 0 && {
+      id: "review-matches",
+      title: `${matches.length} Match${matches.length === 1 ? "" : "es"} ansehen`,
+      text: "Mindestens drei passende Tage überschneiden sich mit anderen Familien.",
+      icon: Sparkles,
+      label: "Matches ansehen",
+      onClick: () => onNavigate("matcher"),
+    },
+    profileIssues.length > 0 && {
+      id: "complete-profile",
+      title: "Profil vervollständigen",
+      text: profileIssues.slice(0, 3).join(", "),
+      icon: Users,
+      label: "Profil öffnen",
+      onClick: () => onNavigate("profile"),
+    },
+    primaryHomeIssues.length > 0 && {
+      id: "complete-home",
+      title: "Hausprofil verbessern",
+      text: primaryHomeIssues.slice(0, 3).join(", "),
+      icon: CheckCircle2,
+      label: "Bearbeiten",
+      onClick: () => onNavigate("my-home"),
+    },
+  ].filter(Boolean).slice(0, 4);
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-lg bg-[#24313a] text-white shadow-soft">
-        <div className="grid gap-5 p-5 md:grid-cols-[1.2fr_0.8fr] md:p-6">
-          <div>
+      <section className="overflow-hidden rounded-lg bg-white shadow-soft">
+        <div className="grid gap-0 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="bg-[#24313a] p-5 text-white md:p-6">
             <p className="text-sm font-semibold text-[#c7d5c4]">Willkommen zurück, {getProfileName(currentProfile)}</p>
             <h2 className="mt-2 max-w-2xl text-3xl font-bold tracking-normal">
-              Alles für euren nächsten Haustausch an einem Ort.
+              Dein Überblick für den nächsten Haustausch.
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-white/78">
-              Behalte freie Zeiträume, passende Matches und offene Anfragen im Blick.
+              Die wichtigsten Entscheidungen, Angebote und passenden Zeiträume auf einen Blick.
             </p>
             <div className="mt-5 flex flex-wrap gap-2">
-              <DashboardAction icon={Home} label={firstOwnedHome ? "Mein Haus bearbeiten" : "Haus anlegen"} onClick={() => onNavigate("my-home")} />
-              <DashboardAction icon={CalendarDays} label="Zeitraum eintragen" onClick={() => onNavigate("calendar")} />
-              <DashboardAction icon={Sparkles} label="Matches ansehen" onClick={() => onNavigate("matcher")} />
+              <DashboardAction icon={Home} label={firstOwnedHome ? "Mein Haus" : "Haus anlegen"} onClick={() => onNavigate("my-home")} />
+              <DashboardAction icon={CalendarDays} label="Kalender" onClick={() => onNavigate("calendar")} />
+              <DashboardAction icon={Search} label="Entdecken" onClick={() => onNavigate("discover")} />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3 rounded-lg bg-white/8 p-3">
-            <DashboardMetric label="Häuser" value={ownedHomes.length} />
-            <DashboardMetric label="Offen" value={openRequests.length} />
-            <DashboardMetric label="Matches" value={matches.length} />
+          <div className="grid grid-cols-2 gap-3 bg-[#f8faf5] p-4 sm:grid-cols-4 lg:grid-cols-2">
+            <DashboardMetric label="Eigene Häuser" value={ownedHomes.length} />
+            <DashboardMetric label="Offen" value={openRequests.length} tone="dark" />
+            <DashboardMetric label="Matches" value={matches.length} tone="green" />
+            <DashboardMetric label="Gebucht" value={acceptedRequests.length} tone="amber" />
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="rounded-lg bg-white p-4 shadow-soft lg:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Nächste Schritte</h2>
+              <p className="mt-1 text-sm text-[#66756d]">Was gerade wirklich Aufmerksamkeit braucht.</p>
+            </div>
+            <Pill tone={nextActions.length ? "amber" : "green"}>{nextActions.length}</Pill>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {nextActions.map((action) => (
+              <DashboardTask key={action.id} {...action} />
+            ))}
+            {!nextActions.length && <EmptyState title="Alles bereit" text="Aktuell gibt es keine dringenden nächsten Schritte." />}
+          </div>
+        </div>
+
         <div className="rounded-lg bg-white p-4 shadow-soft">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -1767,13 +1842,13 @@ function DashboardView({
               Alle <ChevronRight size={17} />
             </button>
           </div>
-          <div className="mt-4 grid gap-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
             {matches.slice(0, 2).map((match) => (
               <div key={match.id} className="flex flex-col gap-3 rounded-lg border border-[#edf0ea] p-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <Pill tone="green">{match.overlap.days} Tage</Pill>
                   <h3 className="mt-2 font-bold">{match.targetHome.title}</h3>
-                  <p className="text-sm text-[#66756d]">{match.targetHome.city} · {formatDateRange(match.overlap.start, match.overlap.end)}</p>
+                  <p className="text-sm text-[#66756d]">{match.targetHome.region || match.targetHome.city} · {formatDateRange(match.overlap.start, match.overlap.end)}</p>
                 </div>
                 <button
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-3 text-sm font-semibold text-white"
@@ -1799,7 +1874,9 @@ function DashboardView({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold">Offene Anfragen</h2>
-              <p className="mt-1 text-sm text-[#66756d]">Alles, was noch entschieden werden muss.</p>
+              <p className="mt-1 text-sm text-[#66756d]">
+                {incomingRequests.length} eingehend, {outgoingRequests.length} gesendet - alles, was noch entschieden werden muss.
+              </p>
             </div>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("requests")}>
               Öffnen <ChevronRight size={17} />
@@ -1811,7 +1888,12 @@ function DashboardView({
               const from = profiles.find((profile) => profile.id === request.fromUserId);
               return (
                 <div key={request.id} className="rounded-lg border border-[#edf0ea] p-3">
-                  <strong>{requestHome?.title ?? "Unterkunft"}</strong>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong>{requestHome?.title ?? "Unterkunft"}</strong>
+                    <Pill tone={request.toUserId === currentProfile.id ? "amber" : "neutral"}>
+                      {request.toUserId === currentProfile.id ? "Eingehend" : "Gesendet"}
+                    </Pill>
+                  </div>
                   <p className="mt-1 text-sm text-[#66756d]">{formatDateRange(request.start, request.end)} · {request.guests} Personen · {getProfileName(from)}</p>
                 </div>
               );
@@ -1823,7 +1905,15 @@ function DashboardView({
 
       <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-lg bg-white p-4 shadow-soft">
-          <h2 className="text-xl font-bold">Nächste freie Zeiträume</h2>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Meine Buchungsangebote</h2>
+              <p className="mt-1 text-sm text-[#66756d]">Deine nächsten freien, anfragbaren Zeiträume.</p>
+            </div>
+            <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("calendar")}>
+              Kalender <ChevronRight size={17} />
+            </button>
+          </div>
           <div className="mt-4 space-y-3">
             {nextAvailabilities.map((availability) => (
               <DateRow
@@ -1863,6 +1953,25 @@ function DashboardView({
   );
 }
 
+function DashboardTask({ icon: Icon, title, text, label, onClick }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-white text-[#2d6a62] ring-1 ring-[#dce3d8]">
+          <Icon size={18} />
+        </div>
+        <div>
+          <strong>{title}</strong>
+          <p className="mt-1 text-sm text-[#66756d]">{text}</p>
+        </div>
+      </div>
+      <button className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#24313a] px-3 text-sm font-semibold text-white" onClick={onClick} type="button">
+        {label} <ChevronRight size={16} />
+      </button>
+    </div>
+  );
+}
+
 function DashboardAction({ icon: Icon, label, onClick }) {
   return (
     <button className="inline-flex h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-[#24313a]" onClick={onClick}>
@@ -1871,11 +1980,18 @@ function DashboardAction({ icon: Icon, label, onClick }) {
   );
 }
 
-function DashboardMetric({ label, value }) {
+function DashboardMetric({ label, value, tone = "neutral" }) {
+  const tones = {
+    neutral: "bg-white text-[#24313a]",
+    dark: "bg-[#24313a] text-white",
+    green: "bg-[#dcedd8] text-[#255c37]",
+    amber: "bg-[#f8e7bd] text-[#75511a]",
+  };
+
   return (
-    <div className="rounded-lg bg-white/10 p-3 text-center">
+    <div className={`rounded-lg p-3 text-center shadow-[0_1px_0_rgba(36,49,58,0.04)] ${tones[tone] ?? tones.neutral}`}>
       <strong className="block text-2xl">{value}</strong>
-      <span className="text-xs font-semibold uppercase text-white/70">{label}</span>
+      <span className="text-xs font-semibold uppercase opacity-70">{label}</span>
     </div>
   );
 }
