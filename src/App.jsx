@@ -2982,7 +2982,7 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
 
     return String(second.createdAt || "").localeCompare(String(first.createdAt || ""));
   });
-  const requestFilterOptions = [
+  const allRequestFilterOptions = [
     { id: "open", label: "Offen", count: visibleRequests.filter((request) => request.status === "pending").length },
     { id: "incoming", label: "Eingehend", count: visibleRequests.filter((request) => request.toUserId === currentProfile.id).length },
     { id: "outgoing", label: "Gesendet", count: visibleRequests.filter((request) => request.fromUserId === currentProfile.id).length },
@@ -2990,6 +2990,13 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
     { id: "declined", label: "Abgelehnt", count: visibleRequests.filter((request) => request.status === "declined").length },
     { id: "all", label: "Alle", count: visibleRequests.length },
   ];
+  const requestFilterOptions = allRequestFilterOptions.filter((option) => {
+    if (option.id === "all") {
+      return visibleRequests.length > 1;
+    }
+
+    return option.count > 0 || option.id === requestFilter;
+  });
   const filteredRequests = sortedRequests.filter((request) => {
     if (requestFilter === "open") {
       return request.status === "pending";
@@ -3009,6 +3016,14 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
 
     return true;
   });
+
+  useEffect(() => {
+    if (requestFilterOptions.some((option) => option.id === requestFilter)) {
+      return;
+    }
+
+    setRequestFilter(requestFilterOptions[0]?.id ?? "open");
+  }, [requestFilter, requestFilterOptions]);
 
   return (
     <div className="grid gap-4">
