@@ -135,9 +135,12 @@ export function isRangeBookable(homeId, start, end, availabilities = [], booking
   );
 }
 
-export function findMatches(availabilities, homes, currentUserId, bookings = []) {
+export function findMatches(availabilities, homes, currentUserId, bookings = [], options = {}) {
   const bookableAvailabilities = getBookableAvailabilities(availabilities, bookings);
-  const userAvailabilities = bookableAvailabilities.filter((availability) => availability.ownerId === currentUserId);
+  const sourceHomeIds = options.sourceHomeIds ? new Set(options.sourceHomeIds) : null;
+  const userAvailabilities = bookableAvailabilities.filter(
+    (availability) => availability.ownerId === currentUserId && (!sourceHomeIds || sourceHomeIds.has(availability.homeId)),
+  );
   const otherAvailabilities = bookableAvailabilities.filter((availability) => availability.ownerId !== currentUserId);
 
   return userAvailabilities

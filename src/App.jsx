@@ -89,6 +89,7 @@ const blankHouse = {
   amenities: ["WLAN", "Kinderfreundlich"],
   photos: [],
   isExternal: false,
+  isPrimaryResidence: false,
 };
 
 const blankAvailability = {
@@ -248,6 +249,10 @@ function getHomeManagementStatus(home, availabilities = [], bookableAvailabiliti
   }
 
   return { status: "published", label: "Öffentlich", tone: "green", detail: "Anfragbar im Freundeskreis." };
+}
+
+function getPrimaryResidenceHome(homes = []) {
+  return homes.find((home) => home.isPrimaryResidence) ?? homes.find((home) => !home.isExternal) ?? homes[0] ?? null;
 }
 
 function getMonthDays(year, monthIndex) {
@@ -638,13 +643,20 @@ function App() {
     [acceptedBookings, state.availabilities],
   );
 
+  const primaryResidenceHome = useMemo(
+    () => getPrimaryResidenceHome(ownedHomes),
+    [ownedHomes],
+  );
+
   const matches = useMemo(() => {
     if (!currentProfile) {
       return [];
     }
 
-    return findMatches(state.availabilities, state.homes, currentProfile.id, acceptedBookings);
-  }, [acceptedBookings, currentProfile, state.availabilities, state.homes]);
+    return findMatches(state.availabilities, state.homes, currentProfile.id, acceptedBookings, {
+      sourceHomeIds: primaryResidenceHome ? [primaryResidenceHome.id] : [],
+    });
+  }, [acceptedBookings, currentProfile, primaryResidenceHome, state.availabilities, state.homes]);
 
   const visibleRequests = useMemo(() => {
     if (!currentProfile) {
@@ -904,6 +916,7 @@ function App() {
         bathrooms: Number(home.bathrooms),
         managedBy: home.managedBy ?? currentProfile.id,
         ownerId: home.ownerId ?? currentProfile.id,
+        isPrimaryResidence: Boolean(home.isPrimaryResidence) && !home.isExternal,
         photos,
         photoCaptions,
         coverPhotoIndex: Math.min(
@@ -912,6 +925,15 @@ function App() {
         ),
       };
 
+      const otherPrimaryHomes = normalized.isPrimaryResidence
+        ? state.homes.filter(
+            (entry) => entry.id !== normalized.id && entry.ownerId === normalized.ownerId && entry.isPrimaryResidence,
+          )
+        : [];
+
+      await Promise.all(
+        otherPrimaryHomes.map((entry) => saveRecord("homes", { ...entry, isPrimaryResidence: false })),
+      );
       await saveRecord("homes", normalized);
       await Promise.all(
         previousPhotos
@@ -920,11 +942,20 @@ function App() {
       );
       updateState((current) => {
         const exists = current.homes.some((entry) => entry.id === normalized.id);
+        const homesWithPrimaryUpdate = current.homes.map((entry) => {
+          if (entry.id === normalized.id) {
+            return normalized;
+          }
+
+          if (normalized.isPrimaryResidence && entry.ownerId === normalized.ownerId) {
+            return { ...entry, isPrimaryResidence: false };
+          }
+
+          return entry;
+        });
         return {
           ...current,
-          homes: exists
-            ? current.homes.map((entry) => (entry.id === normalized.id ? normalized : entry))
-            : [...current.homes, normalized],
+          homes: exists ? homesWithPrimaryUpdate : [...homesWithPrimaryUpdate, normalized],
         };
       });
       await logAudit(previousHome ? "Unterkunft geändert" : "Unterkunft erstellt", "home", normalized.id, normalized.title);
@@ -1469,6 +1500,7 @@ function App() {
           <DashboardView
             currentProfile={currentProfile}
             ownedHomes={ownedHomes}
+            primaryResidenceHome={primaryResidenceHome}
             homes={state.homes}
             allAvailabilities={state.availabilities}
             availabilities={bookableAvailabilities}
@@ -1534,7 +1566,7 @@ function App() {
           />
         )}
         {activeTab === "matcher" && (
-          <MatcherView matches={matches} currentProfile={currentProfile} onRequest={setRequestDraft} />
+          <MatcherView matches={matches} currentProfile={currentProfile} primaryResidenceHome={primaryResidenceHome} onRequest={setRequestDraft} />
         )}
         {activeTab === "requests" && (
           <RequestsView
@@ -1795,6 +1827,7 @@ class ViewErrorBoundary extends Component {
 function DashboardView({
   currentProfile,
   ownedHomes,
+  primaryResidenceHome,
   homes,
   allAvailabilities,
   availabilities,
@@ -1963,7 +1996,9 @@ function DashboardView({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold">Freie Häuser in deiner Urlaubszeit</h2>
-              <p className="mt-1 text-sm text-[#66756d]">Der Smart Matcher zeigt Häuser anderer Familien, die mindestens drei Tage zu deinem geplanten Zeitraum frei sind.</p>
+              <p className="mt-1 text-sm text-[#66756d]">
+                Grundlage sind nur die freien Zeiträume deines Hauptwohnsitzes{primaryResidenceHome ? `: ${primaryResidenceHome.title}` : ""}.
+              </p>
             </div>
             <button className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={() => onNavigate("matcher")}>
               Alle <ChevronRight size={17} />
@@ -1977,7 +2012,7 @@ function DashboardView({
                   <h3 className="mt-2 font-bold">{match.targetHome.title}</h3>
                   <p className="text-sm text-[#66756d]">Frei in deiner Zeit: {formatDateRange(match.overlap.start, match.overlap.end)}</p>
                   <p className="mt-1 text-xs font-semibold text-[#66756d]">
-                    Deine Planung: {match.myAvailability.title || formatDateRange(match.myAvailability.start, match.myAvailability.end)} · Ziel: {match.targetHome.region || match.targetHome.city}
+                    Hauptwohnsitz-Zeitraum: {match.myAvailability.title || formatDateRange(match.myAvailability.start, match.myAvailability.end)} · Ziel: {match.targetHome.region || match.targetHome.city}
                   </p>
                 </div>
                 <button
@@ -1996,7 +2031,7 @@ function DashboardView({
                 </button>
               </div>
             ))}
-            {!matches.length && <EmptyState title="Noch keine freien Häuser gefunden" text="Trage deine geplante Urlaubszeit im Kalender ein. Sobald ein anderes Haus in dieser Zeit frei ist, erscheint es hier." />}
+            {!matches.length && <EmptyState title="Noch keine freien Häuser gefunden" text="Trage freie Zeiträume für deinen Hauptwohnsitz ein. Sobald ein anderes Haus in dieser Zeit frei ist, erscheint es hier." />}
           </div>
         </div>
 
@@ -2322,6 +2357,7 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
     id: createId("home"),
     ownerId: currentProfile.id,
     managedBy: currentProfile.id,
+    isPrimaryResidence: homes.length === 0,
   });
   const [editing, setEditing] = useState(() => homes[0] ?? createHomeDraft());
   const [isCreating, setIsCreating] = useState(() => homes.length === 0);
@@ -2365,6 +2401,13 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
     setIsCreating(!nextHome);
   }
 
+  const explicitPrimaryResidenceExists = homes.some((home) => home.isPrimaryResidence);
+  const effectivePrimaryResidenceHome = getPrimaryResidenceHome(homes);
+  const effectiveEditing =
+    !explicitPrimaryResidenceExists && effectivePrimaryResidenceHome?.id === editing.id
+      ? { ...editing, isPrimaryResidence: true }
+      : editing;
+
   return (
     <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
       <section className="space-y-3">
@@ -2399,6 +2442,8 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
           const homeBookableAvailabilities = bookableAvailabilities.filter((availability) => availability.homeId === home.id);
           const status = getHomeManagementStatus(home, availabilities, bookableAvailabilities, bookings);
           const nextAvailability = getNextAvailability(homeBookableAvailabilities);
+          const primaryResidenceHome = getPrimaryResidenceHome(homes);
+          const isPrimaryResidence = primaryResidenceHome?.id === home.id;
 
           return (
             <button
@@ -2414,7 +2459,10 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
                   <strong>{home.title || "Neue Unterkunft"}</strong>
                   <p className="mt-1 text-sm text-[#66756d]">{home.region || home.city || "Region offen"} · {home.city || "Ort offen"} · bis {home.maxGuests} Gäste</p>
                 </div>
-                <Pill tone={status.tone}>{status.label}</Pill>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  {isPrimaryResidence && <Pill tone="dark">Hauptwohnsitz</Pill>}
+                  <Pill tone={status.tone}>{status.label}</Pill>
+                </div>
               </div>
               <p className="mt-2 text-xs font-semibold text-[#66756d]">
                 {nextAvailability ? `Nächster Zeitraum: ${formatDateRange(nextAvailability.start, nextAvailability.end)}` : status.detail}
@@ -2425,12 +2473,12 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
         </div>
       </section>
       <HouseEditor
-        value={editing}
+        value={effectiveEditing}
         onChange={setEditing}
         onSave={handleSave}
         onDelete={handleDelete}
         onUploadPhoto={onUploadPhoto}
-        onPreview={() => setPreviewHome(editing)}
+        onPreview={() => setPreviewHome(effectiveEditing)}
         isNew={isCreating}
       />
       {previewHome && (
@@ -2688,14 +2736,14 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
   );
 }
 
-function MatcherView({ matches, onRequest }) {
+function MatcherView({ matches, primaryResidenceHome, onRequest }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <h2 className="text-2xl font-bold">Freie Häuser in deiner geplanten Urlaubszeit</h2>
           <p className="mt-1 text-[#66756d]">
-            Der Smart Matcher vergleicht deine eingetragenen Zeiträume mit freien Häusern anderer Familien. Angezeigt werden nur Häuser, die mindestens drei Tage in deiner Zeit verfügbar sind.
+            Der Smart Matcher vergleicht nur die freien Zeiträume deines Hauptwohnsitzes{primaryResidenceHome ? ` (${primaryResidenceHome.title})` : ""} mit freien Häusern anderer Familien. Angezeigt werden nur Häuser, die mindestens drei Tage in dieser Zeit verfügbar sind.
           </p>
         </div>
         <Pill tone="green">{matches.length} freie Häuser</Pill>
@@ -2714,7 +2762,7 @@ function MatcherView({ matches, onRequest }) {
               <Sparkles className="text-[#d97706]" size={28} />
             </div>
             <p className="mt-4 text-sm leading-6 text-[#4f5d55]">
-              Dieses Haus ist während deiner geplanten Zeit "{match.myAvailability.title || formatDateRange(match.myAvailability.start, match.myAvailability.end)}" frei.
+              Dieses Haus ist während des freien Zeitraums deines Hauptwohnsitzes "{match.myAvailability.title || formatDateRange(match.myAvailability.start, match.myAvailability.end)}" frei.
               Der passende Zeitraum ergibt sich aus dem Angebot "{match.targetAvailability.title || match.targetHome.title}".
             </p>
             <button
@@ -2734,7 +2782,7 @@ function MatcherView({ matches, onRequest }) {
           </article>
         ))}
       </div>
-      {!matches.length && <EmptyState title="Noch kein freies Haus in deiner Urlaubszeit" text="Lege im Kalender deine geplanten Reisezeiträume an. Sobald ein Haus aus dem Freundeskreis in dieser Zeit frei ist, erscheint es hier." />}
+      {!matches.length && <EmptyState title="Noch kein freies Haus in deiner Urlaubszeit" text="Lege im Kalender freie Zeiträume für deinen Hauptwohnsitz an. Sobald ein Haus aus dem Freundeskreis in dieser Zeit frei ist, erscheint es hier." />}
     </div>
   );
 }
@@ -3772,6 +3820,22 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, onPrevi
       </div>
       <FieldControlled label="Region" value={value.region ?? ""} onChange={(region) => updateField("region", region)} placeholder="z. B. Schwarzwald, Ostsee, Bayern" />
       <FieldControlled label="Adresse" value={value.address} onChange={(address) => updateField("address", address)} />
+      {!value.isExternal && (
+        <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-[#dce3d8] bg-[#f8faf5] p-3 text-sm font-semibold">
+          <input
+            className="mt-0.5 h-5 w-5 accent-[#2d6a62]"
+            type="checkbox"
+            checked={Boolean(value.isPrimaryResidence)}
+            onChange={(event) => updateField("isPrimaryResidence", event.target.checked)}
+          />
+          <span>
+            Hauptwohnsitz für Smart Matcher
+            <span className="mt-1 block text-xs font-medium text-[#66756d]">
+              Nur die freien Zeiträume dieses Hauses gelten als deine geplante Urlaubszeit für automatische Vorschläge.
+            </span>
+          </span>
+        </label>
+      )}
       <div className="grid gap-3 sm:grid-cols-3">
         <FieldControlled label="Max. Gäste" type="number" value={value.maxGuests} onChange={(maxGuests) => updateField("maxGuests", maxGuests)} />
         <FieldControlled label="Schlafzimmer" type="number" value={value.bedrooms} onChange={(bedrooms) => updateField("bedrooms", bedrooms)} />

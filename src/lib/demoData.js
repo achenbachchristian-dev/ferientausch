@@ -81,6 +81,7 @@ export const demoHomes = [
     photoCaptions: ["Aussenansicht", "Wohnbereich"],
     managedBy: "family-mayer",
     isExternal: false,
+    isPrimaryResidence: true,
   },
   {
     id: "home-lenz",
@@ -101,6 +102,7 @@ export const demoHomes = [
     photoCaptions: ["Wohnzimmer", "Essbereich"],
     managedBy: "family-lenz",
     isExternal: false,
+    isPrimaryResidence: true,
   },
   {
     id: "home-sommer",
@@ -121,6 +123,7 @@ export const demoHomes = [
     photoCaptions: ["Haus am Waldrand", "Terrasse"],
     managedBy: "family-sommer",
     isExternal: false,
+    isPrimaryResidence: true,
   },
   {
     id: "home-grandparents",
