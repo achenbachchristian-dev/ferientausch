@@ -197,27 +197,19 @@ function getRequestSignature(request) {
 
 function dedupeRequests(requests = []) {
   const uniqueRequests = new Map();
-  const signaturesById = new Map();
 
   requests.forEach((request) => {
-    const idKey = request.id ? `id:${request.id}` : "";
     const signatureKey = `signature:${getRequestSignature(request)}`;
-    const existingKey = (idKey && uniqueRequests.has(idKey) && idKey) || signaturesById.get(signatureKey) || signatureKey;
-    const existing = uniqueRequests.get(existingKey);
+    const existing = uniqueRequests.get(signatureKey);
     const existingTime = existing?.updatedAt || existing?.createdAt || "";
     const requestTime = request.updatedAt || request.createdAt || "";
 
     if (!existing || requestTime >= existingTime) {
-      uniqueRequests.set(existingKey, request);
+      uniqueRequests.set(signatureKey, request);
     }
-
-    if (idKey) {
-      uniqueRequests.set(idKey, uniqueRequests.get(existingKey));
-    }
-    signaturesById.set(signatureKey, existingKey);
   });
 
-  return Array.from(new Set(uniqueRequests.values())).sort((first, second) =>
+  return Array.from(uniqueRequests.values()).sort((first, second) =>
     (second.createdAt || "").localeCompare(first.createdAt || ""),
   );
 }
