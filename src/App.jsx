@@ -261,6 +261,14 @@ function isValidDateRange(start, end) {
   return Boolean(start && end && start <= end);
 }
 
+function normalizeDateRange(start, end) {
+  return start <= end ? { start, end } : { start: end, end: start };
+}
+
+function isIsoDateInRange(isoDate, start, end) {
+  return Boolean(start && end && isoDate >= start && isoDate <= end);
+}
+
 function overlapsExistingRange(range, ranges = []) {
   return ranges.some((entry) => entry.id !== range.id && entry.homeId === range.homeId && rangesOverlap(entry, range));
 }
@@ -2358,6 +2366,8 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
 
 function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
   const [form, setForm] = useState({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
+  const [rangeSelectionStart, setRangeSelectionStart] = useState("");
+  const [rangeSelectionHover, setRangeSelectionHover] = useState("");
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -2374,6 +2384,11 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
     ? getHomeManagementStatus(selectedCalendarHome, availabilities, selectedHomeBookableAvailabilities, bookings)
     : null;
   const selectedNextAvailability = getNextAvailability(selectedHomeBookableAvailabilities);
+  const selectionPreview = rangeSelectionStart
+    ? normalizeDateRange(rangeSelectionStart, rangeSelectionHover || rangeSelectionStart)
+    : null;
+  const savedSelection = isValidDateRange(form.start, form.end) ? { start: form.start, end: form.end } : null;
+  const highlightedSelection = selectionPreview ?? savedSelection;
 
   function shiftMonth(offset) {
     const next = new Date(calendarYear, calendarMonthIndex + offset, 1);
@@ -2385,13 +2400,35 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
       return;
     }
 
+    if (!rangeSelectionStart) {
+      setRangeSelectionStart(day.iso);
+      setRangeSelectionHover(day.iso);
+      setForm({
+        ...form,
+        homeId: selectedCalendarHomeId,
+        start: day.iso,
+        end: "",
+        title: form.title || "Freier Zeitraum",
+      });
+      return;
+    }
+
+    const range = normalizeDateRange(rangeSelectionStart, day.iso);
     setForm({
       ...form,
       homeId: selectedCalendarHomeId,
-      start: day.iso,
-      end: day.iso,
-      title: status === "booked" ? "Gebuchter Tag" : "Freier Tag",
+      start: range.start,
+      end: range.end,
+      title: form.title || "Freier Zeitraum",
     });
+    setRangeSelectionStart("");
+    setRangeSelectionHover("");
+  }
+
+  function resetCalendarSelection() {
+    setRangeSelectionStart("");
+    setRangeSelectionHover("");
+    setForm({ ...blankAvailability, id: createId("avail"), homeId: selectedCalendarHomeId });
   }
 
   return (
@@ -2401,7 +2438,15 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
         <div className="mt-4 space-y-3">
           <label className="block text-sm font-semibold">
             Unterkunft
-            <select className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] px-3" value={form.homeId} onChange={(event) => setForm({ ...form, homeId: event.target.value })}>
+            <select
+              className="mt-1 h-11 w-full rounded-lg border border-[#cfd7cd] px-3"
+              value={form.homeId}
+              onChange={(event) => {
+                setRangeSelectionStart("");
+                setRangeSelectionHover("");
+                setForm({ ...form, homeId: event.target.value, start: "", end: "" });
+              }}
+            >
               {homes.map((home) => (
                 <option key={home.id} value={home.id}>{home.title}</option>
               ))}
@@ -2430,13 +2475,32 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
             disabled={!form.homeId || !isValidDateRange(form.start, form.end)}
             onClick={() => {
               onSave(form);
-              setForm({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
+              setRangeSelectionStart("");
+              setRangeSelectionHover("");
+              setForm({ ...blankAvailability, id: createId("avail"), homeId: selectedCalendarHomeId });
             }}
           >
             <CalendarDays size={18} /> Zeitraum speichern
           </button>
         </div>
         <div className="mt-5 rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+          <div className="mb-3 flex flex-col gap-2 rounded-lg border border-[#dce3d8] bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-bold text-[#24313a]">
+                {rangeSelectionStart ? "Enddatum auswählen" : "Zeitraum im Kalender markieren"}
+              </p>
+              <p className="mt-1 text-xs text-[#66756d]">
+                {rangeSelectionStart
+                  ? `Start: ${formatDateRange(rangeSelectionStart, rangeSelectionStart)}. Klicke jetzt auf das Enddatum.`
+                  : "Klicke auf den ersten und danach auf den letzten Tag des freien Zeitraums."}
+              </p>
+            </div>
+            {(rangeSelectionStart || form.start || form.end) && (
+              <button className="inline-flex h-9 items-center justify-center rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" onClick={resetCalendarSelection} type="button">
+                Auswahl löschen
+              </button>
+            )}
+          </div>
           <div className="flex items-center justify-between gap-3">
             <button className="grid h-9 w-9 place-items-center rounded-lg border border-[#cfd7cd] bg-white" onClick={() => shiftMonth(-1)} type="button">
               <ArrowLeft size={16} />
@@ -2457,8 +2521,14 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
           <div className="mt-2 grid grid-cols-7 gap-1">
             {calendarDays.map((day) => {
               const status = getCalendarDayStatus(selectedCalendarHomeId, day.iso, availabilities, bookings);
+              const selected = highlightedSelection && isIsoDateInRange(day.iso, highlightedSelection.start, highlightedSelection.end);
+              const boundary = selected && (day.iso === highlightedSelection.start || day.iso === highlightedSelection.end);
               const className =
-                status === "booked"
+                selected
+                  ? boundary
+                    ? "bg-[#2d6a62] text-white ring-2 ring-[#1f4f49]"
+                    : "bg-[#b8d9c8] text-[#1f4f49]"
+                  : status === "booked"
                   ? "bg-[#f4d3cd] text-[#8a332b]"
                   : status === "free"
                     ? "bg-[#dcedd8] text-[#255c37]"
@@ -2469,6 +2539,11 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
                   className={`grid aspect-square place-items-center rounded-lg text-xs font-bold transition hover:ring-2 hover:ring-[#2d6a62]/30 ${className} ${day.inMonth ? "cursor-pointer" : "cursor-default opacity-45"}`}
                   title={status === "booked" ? "Gebucht" : status === "free" ? "Frei" : "Nicht freigegeben"}
                   type="button"
+                  onMouseEnter={() => {
+                    if (rangeSelectionStart && day.inMonth) {
+                      setRangeSelectionHover(day.iso);
+                    }
+                  }}
                   onClick={() => selectCalendarDay(day, status)}
                 >
                   {day.label}
@@ -2477,6 +2552,7 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
             })}
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-[#66756d]">
+            <span className="rounded-lg bg-[#2d6a62] px-2 py-1 text-white">Auswahl</span>
             <span className="rounded-lg bg-[#dcedd8] px-2 py-1 text-[#255c37]">Frei</span>
             <span className="rounded-lg bg-[#f8e7bd] px-2 py-1 text-[#75511a]">Teilweise gebucht</span>
             <span className="rounded-lg bg-[#f4d3cd] px-2 py-1 text-[#8a332b]">Gebucht</span>
