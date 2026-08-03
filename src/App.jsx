@@ -138,8 +138,29 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function getDaysSince(value) {
+  if (!value) {
+    return 0;
+  }
+
+  const elapsed = Date.now() - new Date(value).getTime();
+  return Math.max(0, Math.floor(elapsed / (24 * 60 * 60 * 1000)));
+}
+
 function isProfileApproved(profile) {
   return Boolean(profile?.isAdmin || profile?.approved !== false);
+}
+
+function getProfileApprovalStatus(profile) {
+  if (profile?.isAdmin) {
+    return { label: "Admin", tone: "dark", detail: "Hat Administrationsrechte." };
+  }
+
+  if (isProfileApproved(profile)) {
+    return { label: "Freigegeben", tone: "green", detail: "Im Freundeskreis sichtbar." };
+  }
+
+  return { label: "Wartet auf Freigabe", tone: "amber", detail: "Noch nicht für andere sichtbar." };
 }
 
 function getProfilePhoto(profile) {
@@ -1449,6 +1470,7 @@ function App() {
             currentProfile={currentProfile}
             ownedHomes={ownedHomes}
             homes={state.homes}
+            allAvailabilities={state.availabilities}
             availabilities={bookableAvailabilities}
             requests={visibleRequests}
             openRequests={openRequests}
@@ -1774,6 +1796,7 @@ function DashboardView({
   currentProfile,
   ownedHomes,
   homes,
+  allAvailabilities,
   availabilities,
   requests,
   openRequests,
@@ -1797,6 +1820,43 @@ function DashboardView({
   const firstOwnedHome = ownedHomes[0];
   const profileIssues = getProfileQualityIssues(currentProfile);
   const primaryHomeIssues = firstOwnedHome ? getHomeQualityIssues(firstOwnedHome) : [];
+  const approvalStatus = getProfileApprovalStatus(currentProfile);
+  const staleOpenRequests = openRequests.filter((request) => {
+    const createdAt = request.createdAt ? new Date(request.createdAt).getTime() : Date.now();
+    return Date.now() - createdAt > 7 * 24 * 60 * 60 * 1000;
+  });
+  const homesWithoutAvailability = ownedHomes.filter((home) => !allAvailabilities.some((availability) => availability.homeId === home.id));
+  const bookedHomes = ownedHomes.filter((home) => getHomeBookingStatus(availabilities.filter((availability) => availability.homeId === home.id), acceptedRequests.filter((request) => request.homeId === home.id)) === "booked");
+  const dashboardHints = [
+    {
+      id: "approval",
+      title: "Profilstatus",
+      text: approvalStatus.detail,
+      tone: approvalStatus.tone,
+      value: approvalStatus.label,
+    },
+    homesWithoutAvailability.length > 0 && {
+      id: "missing-availability",
+      title: "Ohne freie Zeiträume",
+      text: `${homesWithoutAvailability.length} Unterkunft${homesWithoutAvailability.length === 1 ? "" : "en"} braucht neue Buchungsangebote.`,
+      tone: "amber",
+      value: homesWithoutAvailability.length,
+    },
+    staleOpenRequests.length > 0 && {
+      id: "stale-requests",
+      title: "Seit 7 Tagen offen",
+      text: "Diese Anfragen sollten bald beantwortet werden.",
+      tone: "red",
+      value: staleOpenRequests.length,
+    },
+    bookedHomes.length > 0 && {
+      id: "booked-homes",
+      title: "Vollständig gebucht",
+      text: "Für diese Häuser sind aktuell keine freien Tage übrig.",
+      tone: "green",
+      value: bookedHomes.length,
+    },
+  ].filter(Boolean);
   const nextActions = [
     !ownedHomes.length && {
       id: "create-home",
@@ -1874,6 +1934,18 @@ function DashboardView({
             <DashboardMetric label="Gebucht" value={acceptedRequests.length} tone="amber" />
           </div>
         </div>
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {dashboardHints.map((hint) => (
+          <div key={hint.id} className="rounded-lg bg-white p-3 shadow-soft">
+            <div className="flex items-center justify-between gap-3">
+              <strong className="text-sm">{hint.title}</strong>
+              <Pill tone={hint.tone}>{hint.value}</Pill>
+            </div>
+            <p className="mt-2 text-sm text-[#66756d]">{hint.text}</p>
+          </div>
+        ))}
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
@@ -2256,6 +2328,7 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
   });
   const [editing, setEditing] = useState(() => homes[0] ?? createHomeDraft());
   const [isCreating, setIsCreating] = useState(() => homes.length === 0);
+  const [previewHome, setPreviewHome] = useState(null);
 
   useEffect(() => {
     const refreshedHome = homes.find((home) => home.id === editing.id);
@@ -2313,8 +2386,9 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
             <Plus size={18} />
           </IconButton>
         </div>
+        <div className="flex gap-3 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
         {isCreating && (
-          <div className="rounded-lg border border-[#2d6a62] bg-white p-3">
+          <div className="min-w-72 rounded-lg border border-[#2d6a62] bg-white p-3 lg:min-w-0">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <strong>Neue Unterkunft</strong>
@@ -2332,7 +2406,7 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
           return (
             <button
               key={home.id}
-              className={`w-full rounded-lg border p-3 text-left transition hover:bg-white ${!isCreating && editing.id === home.id ? "border-[#2d6a62] bg-white shadow-[0_0_0_2px_rgba(45,106,98,0.10)]" : "border-[#ded8cb] bg-white/70"}`}
+              className={`min-w-72 rounded-lg border p-3 text-left transition hover:bg-white lg:min-w-0 ${!isCreating && editing.id === home.id ? "border-[#2d6a62] bg-white shadow-[0_0_0_2px_rgba(45,106,98,0.10)]" : "border-[#ded8cb] bg-white/70"}`}
               onClick={() => {
                 setEditing(home);
                 setIsCreating(false);
@@ -2351,6 +2425,7 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
             </button>
           );
         })}
+        </div>
       </section>
       <HouseEditor
         value={editing}
@@ -2358,8 +2433,20 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
         onSave={handleSave}
         onDelete={handleDelete}
         onUploadPhoto={onUploadPhoto}
+        onPreview={() => setPreviewHome(editing)}
         isNew={isCreating}
       />
+      {previewHome && (
+        <HomeDetailPanel
+          home={previewHome}
+          owner={currentProfile}
+          availabilities={availabilities.filter((availability) => availability.homeId === previewHome.id)}
+          bookings={bookings.filter((booking) => booking.homeId === previewHome.id)}
+          disabled
+          onClose={() => setPreviewHome(null)}
+          onRequest={() => null}
+        />
+      )}
     </div>
   );
 }
@@ -2798,6 +2885,7 @@ function AdminView({
   const incompleteHomes = state.homes
     .map((home) => ({ home, issues: getHomeQualityIssues(home) }))
     .filter((entry) => entry.issues.length);
+  const homesWithoutAvailability = state.homes.filter((home) => !state.availabilities.some((availability) => availability.homeId === home.id));
   function openAdminHome(home) {
     setAdminHomeDraft(home);
     setAdminSection("homes");
@@ -2806,6 +2894,8 @@ function AdminView({
   const adminTasks = [
     ...pendingProfiles.map((profile) => ({
       id: `profile-${profile.id}`,
+      priority: 1,
+      tone: "amber",
       title: `${getProfileName(profile)} freigeben`,
       text: profile.email || "Neue Registrierung wartet auf Prüfung.",
       action: "Mitglieder öffnen",
@@ -2813,19 +2903,32 @@ function AdminView({
     })),
     ...openRequests.map((request) => ({
       id: `request-${request.id}`,
+      priority: 2,
+      tone: "red",
       title: "Offene Tauschanfrage prüfen",
       text: `${state.homes.find((home) => home.id === request.homeId)?.title ?? "Unterkunft"} · ${formatDateRange(request.start, request.end)}`,
       action: "Anfragen öffnen",
       onClick: () => setAdminSection("requests"),
     })),
+    ...homesWithoutAvailability.map((home) => ({
+      id: `availability-home-${home.id}`,
+      priority: 3,
+      tone: "amber",
+      title: `${home.title || "Unterkunft"} ohne Zeiträume`,
+      text: "Für dieses Haus ist aktuell kein Zeitraum eingetragen.",
+      action: "Haus öffnen",
+      onClick: () => openAdminHome(home),
+    })),
     ...incompleteHomes.slice(0, 6).map(({ home, issues }) => ({
       id: `quality-home-${home.id}`,
+      priority: 4,
+      tone: "neutral",
       title: `${home.title || "Unterkunft"} vervollständigen`,
       text: issues.join(", "),
       action: "Häuser öffnen",
       onClick: () => openAdminHome(home),
     })),
-  ];
+  ].sort((first, second) => first.priority - second.priority);
 
   useEffect(() => {
     setInviteDraft(inviteCode);
@@ -2903,6 +3006,9 @@ function AdminView({
               <div>
                 <strong>{getProfileName(profile)}</strong>
                 <p className="text-sm text-[#66756d]">{profile.email} · {profile.city}</p>
+                <div className="mt-2">
+                  <Pill tone={getProfileApprovalStatus(profile).tone}>{getProfileApprovalStatus(profile).label}</Pill>
+                </div>
                 {profile.approvedAt && (
                   <p className="mt-1 text-xs font-semibold text-[#66756d]">
                     Freigegeben am {formatDateTime(profile.approvedAt)}
@@ -3426,11 +3532,29 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
                 <MapPin size={16} /> {[home.address, home.city, home.region].filter(Boolean).join(", ")}
               </p>
               {owner && owner.visibility !== "private" && (
-                <div className="mt-4 flex items-center gap-3 rounded-lg bg-[#f8faf5] p-3">
-                  <img className="h-12 w-12 rounded-lg object-cover" src={getProfilePhoto(owner)} alt="" />
-                  <div>
-                    <p className="text-sm font-bold">{getProfileName(owner)}</p>
-                    <p className="text-xs text-[#66756d]">{owner.email || "E-Mail nicht hinterlegt"} · {getPhone(owner)}</p>
+                <div className="mt-4 rounded-lg bg-[#f8faf5] p-3">
+                  <div className="flex items-center gap-3">
+                    <img className="h-12 w-12 rounded-lg object-cover" src={getProfilePhoto(owner)} alt="" />
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-bold">{getProfileName(owner)}</p>
+                        <Pill tone={getProfileApprovalStatus(owner).tone}>{getProfileApprovalStatus(owner).label}</Pill>
+                      </div>
+                      <p className="mt-1 text-xs text-[#66756d]">{owner.city || "Wohnort offen"} · {getPhone(owner)}</p>
+                    </div>
+                  </div>
+                  {owner.description && <p className="mt-3 text-sm leading-6 text-[#4f5d55]">{owner.description}</p>}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {owner.email && (
+                      <a className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 text-sm font-semibold" href={`mailto:${owner.email}`}>
+                        <Mail size={16} /> E-Mail
+                      </a>
+                    )}
+                    {owner.phone && (
+                      <a className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-3 text-sm font-semibold" href={`tel:${owner.phone}`}>
+                        <Users size={16} /> Telefon
+                      </a>
+                    )}
                   </div>
                 </div>
               )}
@@ -3545,10 +3669,11 @@ function MapPreview({ home }) {
   );
 }
 
-function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact = false, isNew = false }) {
+function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, onPreview, compact = false, isNew = false }) {
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadNote, setUploadNote] = useState("");
+  const [draggedPhotoIndex, setDraggedPhotoIndex] = useState(null);
 
   function updateField(field, nextValue) {
     onChange({ ...value, [field]: nextValue });
@@ -3576,6 +3701,9 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
 
     setUploadingPhoto(true);
     setUploadNote("Bild wird vorbereitet...");
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadNote("Großes Bild erkannt. Es wird vor dem Upload automatisch komprimiert.");
+    }
     const preparedFile = await compressImageFile(file);
     setUploadNote(
       preparedFile.size < file.size
@@ -3586,6 +3714,28 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
     updatePhotos([...getHomePhotos(value), photoUrl], value.coverPhotoIndex ?? 0, [...getPhotoCaptions(value), ""]);
     setUploadingPhoto(false);
     event.target.value = "";
+  }
+
+  function movePhotoByDrag(targetIndex) {
+    if (draggedPhotoIndex === null || draggedPhotoIndex === targetIndex) {
+      setDraggedPhotoIndex(null);
+      return;
+    }
+
+    const nextPhotos = moveArrayItem(getHomePhotos(value), draggedPhotoIndex, targetIndex);
+    const nextCaptions = moveArrayItem(getPhotoCaptions(value), draggedPhotoIndex, targetIndex);
+    const currentCover = Number(value.coverPhotoIndex ?? 0);
+    const nextCover =
+      currentCover === draggedPhotoIndex
+        ? targetIndex
+        : draggedPhotoIndex < targetIndex && currentCover > draggedPhotoIndex && currentCover <= targetIndex
+          ? currentCover - 1
+          : draggedPhotoIndex > targetIndex && currentCover >= targetIndex && currentCover < draggedPhotoIndex
+            ? currentCover + 1
+            : currentCover;
+
+    updatePhotos(nextPhotos, nextCover, nextCaptions);
+    setDraggedPhotoIndex(null);
   }
 
   const photos = getHomePhotos(value);
@@ -3654,6 +3804,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
       </div>
       <div className="mt-4">
         <span className="text-sm font-semibold">Bildergalerie</span>
+        <p className="mt-1 text-xs font-semibold text-[#66756d]">Bilder können per Drag & Drop sortiert oder über die Pfeile verschoben werden.</p>
         <div className="mt-2 rounded-lg border border-[#dce3d8] bg-[#f8faf5] p-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="aspect-[4/3] w-full overflow-hidden rounded-lg bg-[#edf1e8] sm:w-44">
@@ -3678,7 +3829,16 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {photos.map((photo, index) => (
-            <div key={`${photo}-${index}`} className={`rounded-lg border bg-white p-2 ${coverPhotoIndex === index ? "border-[#2d6a62] shadow-[0_0_0_2px_rgba(45,106,98,0.12)]" : "border-[#edf0ea]"}`}>
+            <div
+              key={`${photo}-${index}`}
+              className={`rounded-lg border bg-white p-2 transition ${draggedPhotoIndex === index ? "opacity-55" : ""} ${coverPhotoIndex === index ? "border-[#2d6a62] shadow-[0_0_0_2px_rgba(45,106,98,0.12)]" : "border-[#edf0ea]"}`}
+              draggable
+              onDragStart={() => setDraggedPhotoIndex(index)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => movePhotoByDrag(index)}
+              onDragEnd={() => setDraggedPhotoIndex(null)}
+              title="Zum Sortieren ziehen"
+            >
               <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-[#edf1e8]">
                 <img className="h-full w-full object-cover" src={photo} alt="" />
                 {coverPhotoIndex === index && (
@@ -3786,6 +3946,15 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
         >
           <Check size={18} /> {isNew ? "Unterkunft anlegen" : "Speichern"}
         </button>
+        {onPreview && (
+          <button
+            className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#cfd7cd] bg-white px-4 font-semibold text-[#24313a]"
+            onClick={onPreview}
+            type="button"
+          >
+            <Search size={18} /> Vorschau anzeigen
+          </button>
+        )}
         {onDelete && !isNew && (
           <button className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#d8c4bd] bg-white px-4 font-semibold text-[#9f3f34]" onClick={() => onDelete(value.id)}>
             <Trash2 size={18} /> Löschen
@@ -3806,6 +3975,21 @@ function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit
   const alternativeRanges = home
     ? getBookableAvailabilities(availabilities, bookings).filter((availability) => availability.homeId === home.id)
     : [];
+  const recommendedRange = getNextAvailability(alternativeRanges);
+
+  function applyRecommendedRange(range = recommendedRange) {
+    if (!range) {
+      return;
+    }
+
+    setForm({
+      ...form,
+      start: range.start,
+      end: range.end,
+      guests: Math.min(Number(form.guests) || 4, Number(home?.maxGuests ?? 4)),
+      message: form.message || `Wir würden gerne den Zeitraum ${formatDateRange(range.start, range.end)} anfragen.`,
+    });
+  }
 
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/35 p-3 sm:place-items-center">
@@ -3820,6 +4004,21 @@ function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit
           </IconButton>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {recommendedRange && (
+            <div className="rounded-lg border border-[#dce3d8] bg-[#f8faf5] p-3 sm:col-span-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <strong>Empfohlener Zeitraum</strong>
+                  <p className="mt-1 text-sm text-[#66756d]">
+                    {recommendedRange.title || "Freier Zeitraum"} · {formatDateRange(recommendedRange.start, recommendedRange.end)}
+                  </p>
+                </div>
+                <button className="inline-flex h-10 items-center justify-center rounded-lg bg-[#24313a] px-3 text-sm font-semibold text-white" onClick={() => applyRecommendedRange()} type="button">
+                  Übernehmen
+                </button>
+              </div>
+            </div>
+          )}
           <FieldControlled label="Start" type="date" value={form.start} onChange={(start) => setForm({ ...form, start })} />
           <FieldControlled label="Ende" type="date" value={form.end} onChange={(end) => setForm({ ...form, end })} />
         </div>
@@ -3854,7 +4053,7 @@ function RequestPanel({ draft, home, availabilities, bookings, onClose, onSubmit
                   <button
                     key={availability.id}
                     className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-[#24313a]"
-                    onClick={() => setForm({ ...form, start: availability.start, end: availability.end })}
+                    onClick={() => applyRecommendedRange(availability)}
                     type="button"
                   >
                     {formatDateRange(availability.start, availability.end)}
@@ -3885,6 +4084,7 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
   const canAdminEdit = currentProfile.isAdmin;
   const canDelete = currentProfile.isAdmin || (request.fromUserId === currentProfile.id && request.status !== "pending");
   const emailHref = requestEmailDraft(request, home, from, to);
+  const openDays = request.status === "pending" ? getDaysSince(request.createdAt) : 0;
 
   useEffect(() => {
     if (!editing) {
@@ -3919,6 +4119,11 @@ function RequestCard({ request, home, from, to, homes, profiles, currentProfile,
           <p className="mt-1 text-sm text-[#66756d]">
             {formatDateRange(request.start, request.end)} · {request.guests} Personen · {getProfileName(from)} an {to ? getProfileName(to) : "extern"}
           </p>
+          {openDays >= 7 && (
+            <p className="mt-2 rounded-lg border border-[#f0d2a0] bg-[#fff7e8] px-3 py-2 text-sm font-semibold text-[#75511a]">
+              Diese Anfrage ist seit {openDays} Tagen offen.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <a className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#cfd7cd] px-3 text-sm font-semibold" href={emailHref}>
@@ -4096,6 +4301,7 @@ function Pill({ children, tone = "neutral" }) {
     green: "bg-[#dcedd8] text-[#255c37]",
     amber: "bg-[#f8e7bd] text-[#75511a]",
     red: "bg-[#f4d3cd] text-[#8a332b]",
+    dark: "bg-[#24313a] text-white",
   };
 
   return <span className={`inline-flex h-7 items-center rounded-lg px-2 text-xs font-bold ${tones[tone]}`}>{children}</span>;
@@ -4128,7 +4334,10 @@ function AdminTaskPanel({ tasks, compact = false, onOpenAll }) {
         {tasks.map((task) => (
           <div key={task.id} className="flex flex-col gap-3 rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <strong>{task.title}</strong>
+              <div className="flex flex-wrap items-center gap-2">
+                <Pill tone={task.tone ?? "neutral"}>Priorität {task.priority ?? "-"}</Pill>
+                <strong>{task.title}</strong>
+              </div>
               <p className="mt-1 text-sm text-[#66756d]">{task.text}</p>
             </div>
             <button className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 text-sm font-semibold text-[#24313a] ring-1 ring-[#dce3d8]" onClick={task.onClick} type="button">
