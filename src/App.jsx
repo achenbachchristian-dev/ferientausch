@@ -222,6 +222,36 @@ function dedupeRequests(requests = []) {
   );
 }
 
+function groupDuplicates(items = [], getKey) {
+  const groups = new Map();
+  items.forEach((item) => {
+    const key = getKey(item);
+    if (!key) {
+      return;
+    }
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  });
+
+  return Array.from(groups.values()).filter((group) => group.length > 1);
+}
+
+function getDuplicateRequestGroups(requests = []) {
+  return groupDuplicates(requests, getRequestSignature);
+}
+
+function getHomeSignature(home) {
+  return [
+    home.ownerId || home.managedBy || "",
+    String(home.title || "").trim().toLowerCase(),
+    String(home.city || "").trim().toLowerCase(),
+    String(home.address || "").trim().toLowerCase(),
+  ].join("|");
+}
+
+function getDuplicateHomeGroups(homes = []) {
+  return groupDuplicates(homes, getHomeSignature);
+}
+
 function getHomeBookingStatus(bookableAvailabilities = [], bookings = []) {
   if (!bookings.length) {
     return null;
@@ -292,6 +322,29 @@ function getHomeManagementStatus(home, availabilities = [], bookableAvailabiliti
 
 function getPrimaryResidenceHome(homes = []) {
   return homes.find((home) => home.isPrimaryResidence) ?? homes.find((home) => !home.isExternal) ?? homes[0] ?? null;
+}
+
+function getHomeRoleLabel(home, homes = []) {
+  if (!home) {
+    return "Unterkunft";
+  }
+
+  if (home.isExternal) {
+    return "Extern gepflegt";
+  }
+
+  const personalHomes = homes.filter((entry) => !entry.isExternal);
+  const primaryHome = getPrimaryResidenceHome(homes);
+
+  if (primaryHome?.id === home.id && personalHomes.length > 1) {
+    return "Hauptwohnsitz";
+  }
+
+  if (primaryHome?.id === home.id) {
+    return "Unterkunft";
+  }
+
+  return "Ferienwohnung";
 }
 
 function getMonthDays(year, monthIndex) {
@@ -720,6 +773,45 @@ function App() {
     () => visibleRequests.filter((request) => request.status === "pending"),
     [visibleRequests],
   );
+
+  const duplicateRequestGroups = useMemo(
+    () => getDuplicateRequestGroups(state.requests),
+    [state.requests],
+  );
+
+  const duplicateHomeGroups = useMemo(
+    () => getDuplicateHomeGroups(state.homes),
+    [state.homes],
+  );
+
+  const adminBadgeCount = useMemo(() => {
+    if (!currentProfile?.isAdmin) {
+      return 0;
+    }
+
+    const pendingProfileCount = state.profiles.filter((profile) => !isProfileApproved(profile)).length;
+    const homesWithoutAvailabilityCount = state.homes.filter((home) => !state.availabilities.some((availability) => availability.homeId === home.id)).length;
+
+    return (
+      pendingProfileCount +
+      openRequests.length +
+      homesWithoutAvailabilityCount +
+      duplicateRequestGroups.length +
+      duplicateHomeGroups.length
+    );
+  }, [currentProfile, duplicateHomeGroups, duplicateRequestGroups, openRequests, state.availabilities, state.homes, state.profiles]);
+
+  function getNavBadge(tabId) {
+    if (tabId === "requests") {
+      return openRequests.length;
+    }
+
+    if (tabId === "admin") {
+      return adminBadgeCount;
+    }
+
+    return 0;
+  }
 
   const filteredHomes = useMemo(() => {
     return state.homes.filter((home) => {
@@ -1521,6 +1613,7 @@ function App() {
           {[...tabs, ...(currentProfile.isAdmin ? [{ id: "admin", label: "Admin", icon: ShieldCheck }] : [])].map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
+            const badgeCount = getNavBadge(tab.id);
             return (
               <button
                 key={tab.id}
@@ -1530,7 +1623,14 @@ function App() {
                 onClick={() => setActiveTab(tab.id)}
               >
                 <Icon size={17} />
-                {tab.label}
+                <span>{tab.label}</span>
+                {badgeCount > 0 && (
+                  <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
+                    active ? "bg-white text-[#24313a]" : "bg-[#e05f4f] text-white"
+                  }`}>
+                    {badgeCount > 99 ? "99+" : badgeCount}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1606,6 +1706,7 @@ function App() {
             homes={ownedHomes}
             availabilities={state.availabilities.filter((entry) => ownedHomes.some((home) => home.id === entry.homeId))}
             bookings={acceptedBookings.filter((booking) => ownedHomes.some((home) => home.id === booking.homeId))}
+            profiles={state.profiles}
             onSave={saveAvailability}
             onDelete={deleteAvailability}
           />
@@ -1635,6 +1736,7 @@ function App() {
         {activeTab === "admin" && currentProfile.isAdmin && (
           <AdminView
             state={{ ...state, requests: uniqueRequests }}
+            rawRequests={state.requests}
             currentProfile={currentProfile}
             onSaveHome={upsertHome}
             onDeleteHome={deleteHome}
@@ -1667,6 +1769,7 @@ function App() {
           .map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
+            const badgeCount = getNavBadge(tab.id);
             return (
               <button
                 key={tab.id}
@@ -1676,7 +1779,16 @@ function App() {
                 onClick={() => setActiveTab(tab.id)}
                 type="button"
               >
-                <Icon size={18} />
+                <span className="relative">
+                  <Icon size={18} />
+                  {badgeCount > 0 && (
+                    <span className={`absolute -right-3 -top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] ${
+                      active ? "bg-white text-[#24313a]" : "bg-[#e05f4f] text-white"
+                    }`}>
+                      {badgeCount > 9 ? "9+" : badgeCount}
+                    </span>
+                  )}
+                </span>
                 <span className="mt-1 truncate">{tab.label}</span>
               </button>
             );
@@ -1699,6 +1811,7 @@ function App() {
           owner={state.profiles.find((profile) => profile.id === state.homes.find((home) => home.id === selectedHomeId)?.ownerId)}
           availabilities={state.availabilities.filter((availability) => availability.homeId === selectedHomeId)}
           bookings={acceptedBookings.filter((booking) => booking.homeId === selectedHomeId)}
+          profiles={state.profiles}
           disabled={state.homes.find((home) => home.id === selectedHomeId)?.ownerId === currentProfile.id}
           onClose={() => setSelectedHomeId(null)}
           onRequest={(draft) => {
@@ -2559,7 +2672,7 @@ function MyHomeView({ homes, availabilities, bookableAvailabilities, bookings, c
   );
 }
 
-function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
+function CalendarView({ homes, availabilities, bookings, profiles = [], onSave, onDelete }) {
   const [form, setForm] = useState({ ...blankAvailability, id: createId("avail"), homeId: homes[0]?.id ?? "" });
   const [rangeSelectionStart, setRangeSelectionStart] = useState("");
   const [rangeSelectionHover, setRangeSelectionHover] = useState("");
@@ -2578,6 +2691,7 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
   const selectedHomeStatus = selectedCalendarHome
     ? getHomeManagementStatus(selectedCalendarHome, availabilities, selectedHomeBookableAvailabilities, bookings)
     : null;
+  const selectedHomeRoleLabel = getHomeRoleLabel(selectedCalendarHome, homes);
   const selectedNextAvailability = getNextAvailability(selectedHomeBookableAvailabilities);
   const selectionPreview = rangeSelectionStart
     ? normalizeDateRange(rangeSelectionStart, rangeSelectionHover || rangeSelectionStart)
@@ -2643,7 +2757,7 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
               }}
             >
               {homes.map((home) => (
-                <option key={home.id} value={home.id}>{home.title}</option>
+                <option key={home.id} value={home.id}>{home.title} - {getHomeRoleLabel(home, homes)}</option>
               ))}
             </select>
           </label>
@@ -2651,7 +2765,10 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
             <div className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <strong>Status dieser Unterkunft</strong>
-                <Pill tone={selectedHomeStatus.tone}>{selectedHomeStatus.label}</Pill>
+                <div className="flex flex-wrap gap-2">
+                  <Pill tone="neutral">{selectedHomeRoleLabel}</Pill>
+                  <Pill tone={selectedHomeStatus.tone}>{selectedHomeStatus.label}</Pill>
+                </div>
               </div>
               <p className="mt-1 text-sm text-[#66756d]">
                 {selectedNextAvailability
@@ -2783,14 +2900,19 @@ function CalendarView({ homes, availabilities, bookings, onSave, onDelete }) {
         <h2 className="mb-3 mt-6 text-xl font-bold">Gebuchte Zeiträume</h2>
         <div className="grid gap-3">
           {sortedBookings.map((booking) => (
-            <DateRow
-              key={booking.id}
-              title="Gebucht"
-              subtitle={homes.find((home) => home.id === booking.homeId)?.title ?? "Unterkunft"}
-              start={booking.start}
-              end={booking.end}
-              status="booked"
-            />
+            <div key={booking.id} className="rounded-lg border border-[#f0d3cd] bg-[#fff8f6] p-3">
+              <DateRow
+                title="Durch angenommene Anfrage gebucht"
+                subtitle={`${homes.find((home) => home.id === booking.homeId)?.title ?? "Unterkunft"} · ${
+                  getProfileName(profiles.find((profile) => profile.id === booking.fromUserId))}`}
+                start={booking.start}
+                end={booking.end}
+                status="booked"
+              />
+              <p className="mt-2 text-xs font-semibold text-[#8a332b]">
+                Buchungsschutz aktiv: Diese Tage stehen für neue Anfragen nicht mehr zur Verfügung.
+              </p>
+            </div>
           ))}
           {!sortedBookings.length && <EmptyState title="Noch keine Buchungen" text="Angenommene Anfragen erscheinen hier automatisch." />}
         </div>
@@ -2855,11 +2977,69 @@ function MatcherView({ matches, primaryResidenceHome, hasMultipleOwnHomes, onReq
 }
 
 function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onMessage, onSave, onDelete }) {
+  const [requestFilter, setRequestFilter] = useState("open");
   const visibleRequests = requests.filter((request) => request.fromUserId === currentProfile.id || request.toUserId === currentProfile.id || currentProfile.isAdmin);
+  const sortedRequests = [...visibleRequests].sort((first, second) => {
+    const statusOrder = { pending: 0, accepted: 1, declined: 2 };
+    const firstStatus = statusOrder[first.status] ?? 3;
+    const secondStatus = statusOrder[second.status] ?? 3;
+
+    if (firstStatus !== secondStatus) {
+      return firstStatus - secondStatus;
+    }
+
+    return String(second.createdAt || "").localeCompare(String(first.createdAt || ""));
+  });
+  const requestFilterOptions = [
+    { id: "open", label: "Offen", count: visibleRequests.filter((request) => request.status === "pending").length },
+    { id: "incoming", label: "Eingehend", count: visibleRequests.filter((request) => request.toUserId === currentProfile.id).length },
+    { id: "outgoing", label: "Gesendet", count: visibleRequests.filter((request) => request.fromUserId === currentProfile.id).length },
+    { id: "accepted", label: "Angenommen", count: visibleRequests.filter((request) => request.status === "accepted").length },
+    { id: "declined", label: "Abgelehnt", count: visibleRequests.filter((request) => request.status === "declined").length },
+    { id: "all", label: "Alle", count: visibleRequests.length },
+  ];
+  const filteredRequests = sortedRequests.filter((request) => {
+    if (requestFilter === "open") {
+      return request.status === "pending";
+    }
+
+    if (requestFilter === "incoming") {
+      return request.toUserId === currentProfile.id;
+    }
+
+    if (requestFilter === "outgoing") {
+      return request.fromUserId === currentProfile.id;
+    }
+
+    if (requestFilter === "accepted" || requestFilter === "declined") {
+      return request.status === requestFilter;
+    }
+
+    return true;
+  });
 
   return (
     <div className="grid gap-4">
-      {visibleRequests.map((request) => (
+      <section className="rounded-lg bg-white p-3 shadow-soft">
+        <div className="flex gap-2 overflow-x-auto">
+          {requestFilterOptions.map((option) => (
+            <button
+              key={option.id}
+              className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-semibold ${
+                requestFilter === option.id ? "bg-[#24313a] text-white" : "bg-[#f8faf5] text-[#4f5d55]"
+              }`}
+              onClick={() => setRequestFilter(option.id)}
+              type="button"
+            >
+              {option.label}
+              <span className={`rounded-full px-2 py-0.5 text-xs ${requestFilter === option.id ? "bg-white/18" : "bg-white"}`}>
+                {option.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+      {filteredRequests.map((request) => (
         <RequestCard
           key={request.id}
           request={request}
@@ -2876,6 +3056,7 @@ function RequestsView({ requests, homes, profiles, currentProfile, onStatus, onM
         />
       ))}
       {!visibleRequests.length && <EmptyState title="Keine Anfragen" text="Neue Tauschanfragen erscheinen hier mit Status und Nachrichtenverlauf." />}
+      {Boolean(visibleRequests.length) && !filteredRequests.length && <EmptyState title="Keine passenden Anfragen" text="In diesem Filter gibt es aktuell keine Einträge." />}
     </div>
   );
 }
@@ -2958,6 +3139,7 @@ function ProfileView({ profile, onSave, onUploadPhoto }) {
 
 function AdminView({
   state,
+  rawRequests = [],
   currentProfile,
   onSaveHome,
   onDeleteHome,
@@ -2992,11 +3174,14 @@ function AdminView({
     { id: "homes", label: "Häuser" },
     { id: "requests", label: "Anfragen" },
     { id: "bookings", label: "Buchungen" },
+    { id: "duplicates", label: "Duplikate" },
     { id: "audit", label: "Audit" },
     { id: "export", label: "Export" },
   ];
   const bookings = mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]);
   const bookingOffers = getBookableAvailabilities(state.availabilities, bookings);
+  const duplicateRequestGroups = getDuplicateRequestGroups(rawRequests);
+  const duplicateHomeGroups = getDuplicateHomeGroups(state.homes);
   const pendingProfiles = state.profiles.filter((profile) => !isProfileApproved(profile));
   const openRequests = state.requests.filter((request) => request.status === "pending");
   const incompleteHomes = state.homes
@@ -3035,6 +3220,24 @@ function AdminView({
       text: "Für dieses Haus ist aktuell kein Zeitraum eingetragen.",
       action: "Haus öffnen",
       onClick: () => openAdminHome(home),
+    })),
+    ...duplicateRequestGroups.map((group, index) => ({
+      id: `duplicate-request-${index}`,
+      priority: 3,
+      tone: "amber",
+      title: `${group.length} doppelte Anfragen prüfen`,
+      text: `${state.homes.find((home) => home.id === group[0]?.homeId)?.title ?? "Unterkunft"} · ${formatDateRange(group[0]?.start, group[0]?.end)}`,
+      action: "Duplikate öffnen",
+      onClick: () => setAdminSection("duplicates"),
+    })),
+    ...duplicateHomeGroups.map((group, index) => ({
+      id: `duplicate-home-${index}`,
+      priority: 4,
+      tone: "neutral",
+      title: `${group.length} mögliche doppelte Häuser`,
+      text: group.map((home) => home.title || "Unterkunft").join(", "),
+      action: "Duplikate öffnen",
+      onClick: () => setAdminSection("duplicates"),
     })),
     ...incompleteHomes.slice(0, 6).map(({ home, issues }) => ({
       id: `quality-home-${home.id}`,
@@ -3386,6 +3589,94 @@ function AdminView({
           </div>
         </section>
       )}
+      {adminSection === "duplicates" && (
+        <section className="space-y-5">
+          <div className="rounded-lg bg-white p-4 shadow-soft">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold">Duplikate prüfen</h2>
+                <p className="mt-1 text-sm text-[#66756d]">
+                  Doppelte Anfragen können direkt bereinigt werden. Mögliche doppelte Häuser bitte erst öffnen und vergleichen.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Pill tone={duplicateRequestGroups.length ? "amber" : "green"}>{duplicateRequestGroups.length} Anfrage-Gruppen</Pill>
+                <Pill tone={duplicateHomeGroups.length ? "amber" : "green"}>{duplicateHomeGroups.length} Haus-Gruppen</Pill>
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="rounded-lg bg-white p-4 shadow-soft">
+              <h3 className="text-lg font-bold">Doppelte Anfragen</h3>
+              <div className="mt-3 grid gap-3">
+                {duplicateRequestGroups.map((group, index) => {
+                  const sortedGroup = [...group].sort((first, second) =>
+                    String(second.updatedAt || second.createdAt || "").localeCompare(String(first.updatedAt || first.createdAt || "")),
+                  );
+                  const keepRequest = sortedGroup[0];
+                  const duplicateRequests = sortedGroup.slice(1);
+                  const home = state.homes.find((entry) => entry.id === keepRequest.homeId);
+
+                  return (
+                    <div key={`${keepRequest.id}-${index}`} className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Pill tone="amber">{group.length} Treffer</Pill>
+                            <strong>{home?.title ?? "Unterkunft"}</strong>
+                          </div>
+                          <p className="mt-1 text-sm text-[#66756d]">
+                            {formatDateRange(keepRequest.start, keepRequest.end)} · {keepRequest.guests || 0} Personen · {statusLabels[keepRequest.status] ?? keepRequest.status}
+                          </p>
+                          <p className="mt-1 text-xs font-semibold text-[#66756d]">
+                            Behalten: {keepRequest.id}. Entfernen: {duplicateRequests.map((request) => request.id).join(", ")}
+                          </p>
+                        </div>
+                        <button
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-3 text-sm font-semibold text-white disabled:bg-[#b7bdb8]"
+                          disabled={!duplicateRequests.length}
+                          onClick={() => duplicateRequests.forEach((request) => request.id && onDeleteRequest(request.id))}
+                          type="button"
+                        >
+                          <Trash2 size={17} /> Doppelte löschen
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!duplicateRequestGroups.length && <EmptyState title="Keine doppelten Anfragen" text="Die sichtbaren Anfragen sind sauber zusammengeführt." />}
+              </div>
+            </div>
+            <div className="rounded-lg bg-white p-4 shadow-soft">
+              <h3 className="text-lg font-bold">Mögliche doppelte Häuser</h3>
+              <div className="mt-3 grid gap-3">
+                {duplicateHomeGroups.map((group, index) => (
+                  <div key={`home-duplicate-${index}`} className="rounded-lg border border-[#edf0ea] bg-[#f8faf5] p-3">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <Pill tone="amber">{group.length} Treffer</Pill>
+                      <strong>{group[0]?.title || "Unterkunft"}</strong>
+                    </div>
+                    <div className="grid gap-2">
+                      {group.map((home) => (
+                        <button
+                          key={home.id}
+                          className="flex flex-col items-start rounded-lg bg-white p-3 text-left text-sm ring-1 ring-[#dce3d8]"
+                          onClick={() => openAdminHome(home)}
+                          type="button"
+                        >
+                          <strong>{home.title || "Unterkunft öffnen"}</strong>
+                          <span className="text-[#66756d]">{home.city || "Ort offen"} · {home.address || "Adresse offen"} · {getHomeRoleLabel(home, state.homes)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {!duplicateHomeGroups.length && <EmptyState title="Keine möglichen Haus-Duplikate" text="Titel, Ort und Adresse wirken eindeutig." />}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
       {adminSection === "audit" && (
         <section className="rounded-lg bg-white p-4 shadow-soft">
           <h2 className="text-xl font-bold">Audit-Log</h2>
@@ -3559,7 +3850,7 @@ function HomeCard({ home, availabilities, bookableAvailabilities, bookings, disa
   );
 }
 
-function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onClose, onRequest }) {
+function HomeDetailPanel({ home, owner, availabilities, bookings, profiles = [], disabled, onClose, onRequest }) {
   const photos = getHomePhotos(home);
   const initialIndex = Math.min(Math.max(Number(home?.coverPhotoIndex ?? 0), 0), Math.max(photos.length - 1, 0));
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(initialIndex);
@@ -3729,14 +4020,18 @@ function HomeDetailPanel({ home, owner, availabilities, bookings, disabled, onCl
               <h3 className="text-lg font-bold">Gebuchte Zeiträume</h3>
               <div className="mt-3 space-y-2">
                 {bookings.map((booking) => (
-                  <DateRow
-                    key={booking.id}
-                    title="Gebucht"
-                    subtitle={home.title}
-                    start={booking.start}
-                    end={booking.end}
-                    status="booked"
-                  />
+                  <div key={booking.id} className="rounded-lg border border-[#f0d3cd] bg-[#fff8f6] p-3">
+                    <DateRow
+                      title="Durch angenommene Anfrage gebucht"
+                      subtitle={`${home.title} · ${getProfileName(profiles.find((profile) => profile.id === booking.fromUserId))}`}
+                      start={booking.start}
+                      end={booking.end}
+                      status="booked"
+                    />
+                    <p className="mt-2 text-xs font-semibold text-[#8a332b]">
+                      Diese Tage sind blockiert und stehen nicht mehr für neue Anfragen zur Verfügung.
+                    </p>
+                  </div>
                 ))}
                 {!bookings.length && <EmptyState title="Keine Buchungen" text="Angenommene Anfragen blockieren hier automatisch die Tage." />}
               </div>
