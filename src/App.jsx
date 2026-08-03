@@ -3408,6 +3408,12 @@ function AdminView({
                 <div>
                   <strong>{home.title}</strong>
                   <p className="text-sm text-[#66756d]">{home.region || home.city} · {home.city} {home.isExternal ? "· extern gepflegt" : ""}</p>
+                  <p className="mt-1 text-xs font-semibold text-[#66756d]">
+                    Eigentümer: {getProfileName(state.profiles.find((profile) => profile.id === home.ownerId))}
+                    {home.managedBy && home.managedBy !== home.ownerId
+                      ? ` · gepflegt von ${getProfileName(state.profiles.find((profile) => profile.id === home.managedBy))}`
+                      : ""}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <IconButton label="Unterkunft bearbeiten" onClick={() => setAdminHomeDraft(home)}>
