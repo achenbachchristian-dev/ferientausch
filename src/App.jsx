@@ -183,6 +183,45 @@ function mergeBookings(bookings = []) {
   return Array.from(merged.values()).sort((first, second) => first.start.localeCompare(second.start));
 }
 
+function getRequestSignature(request) {
+  return [
+    request.fromUserId,
+    request.toUserId,
+    request.homeId,
+    request.start,
+    request.end,
+    Number(request.guests ?? 0),
+    request.status,
+  ].join("|");
+}
+
+function dedupeRequests(requests = []) {
+  const uniqueRequests = new Map();
+  const signaturesById = new Map();
+
+  requests.forEach((request) => {
+    const idKey = request.id ? `id:${request.id}` : "";
+    const signatureKey = `signature:${getRequestSignature(request)}`;
+    const existingKey = (idKey && uniqueRequests.has(idKey) && idKey) || signaturesById.get(signatureKey) || signatureKey;
+    const existing = uniqueRequests.get(existingKey);
+    const existingTime = existing?.updatedAt || existing?.createdAt || "";
+    const requestTime = request.updatedAt || request.createdAt || "";
+
+    if (!existing || requestTime >= existingTime) {
+      uniqueRequests.set(existingKey, request);
+    }
+
+    if (idKey) {
+      uniqueRequests.set(idKey, uniqueRequests.get(existingKey));
+    }
+    signaturesById.set(signatureKey, existingKey);
+  });
+
+  return Array.from(new Set(uniqueRequests.values())).sort((first, second) =>
+    (second.createdAt || "").localeCompare(first.createdAt || ""),
+  );
+}
+
 function getHomeBookingStatus(bookableAvailabilities = [], bookings = []) {
   if (!bookings.length) {
     return null;
@@ -633,9 +672,14 @@ function App() {
     return state.homes.filter((home) => home.ownerId === currentProfile.id || home.managedBy === currentProfile.id);
   }, [currentProfile, state.homes]);
 
+  const uniqueRequests = useMemo(
+    () => dedupeRequests(state.requests),
+    [state.requests],
+  );
+
   const acceptedBookings = useMemo(
-    () => mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(state.requests)]),
-    [state.bookings, state.requests],
+    () => mergeBookings([...(state.bookings ?? []), ...getAcceptedBookings(uniqueRequests)]),
+    [state.bookings, uniqueRequests],
   );
 
   const bookableAvailabilities = useMemo(
@@ -664,13 +708,13 @@ function App() {
       return [];
     }
 
-    return state.requests.filter(
+    return uniqueRequests.filter(
       (request) =>
         request.fromUserId === currentProfile.id ||
         request.toUserId === currentProfile.id ||
         currentProfile.isAdmin,
     );
-  }, [currentProfile, state.requests]);
+  }, [currentProfile, uniqueRequests]);
 
   const openRequests = useMemo(
     () => visibleRequests.filter((request) => request.status === "pending"),
@@ -1044,7 +1088,7 @@ function App() {
         return;
       }
 
-      const hasDuplicatePendingRequest = state.requests.some(
+      const hasDuplicatePendingRequest = uniqueRequests.some(
         (request) =>
           request.fromUserId === currentProfile.id &&
           request.homeId === draft.homeId &&
@@ -1577,7 +1621,7 @@ function App() {
         )}
         {activeTab === "requests" && (
           <RequestsView
-            requests={state.requests}
+            requests={uniqueRequests}
             homes={state.homes}
             profiles={state.profiles}
             currentProfile={currentProfile}
@@ -1590,7 +1634,7 @@ function App() {
         {activeTab === "profile" && <ProfileView profile={currentProfile} onSave={saveProfile} onUploadPhoto={handleProfilePhotoUpload} />}
         {activeTab === "admin" && currentProfile.isAdmin && (
           <AdminView
-            state={state}
+            state={{ ...state, requests: uniqueRequests }}
             currentProfile={currentProfile}
             onSaveHome={upsertHome}
             onDeleteHome={deleteHome}
