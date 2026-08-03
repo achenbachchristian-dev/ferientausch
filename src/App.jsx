@@ -1820,7 +1820,6 @@ function DashboardView({
   const firstOwnedHome = ownedHomes[0];
   const profileIssues = getProfileQualityIssues(currentProfile);
   const primaryHomeIssues = firstOwnedHome ? getHomeQualityIssues(firstOwnedHome) : [];
-  const approvalStatus = getProfileApprovalStatus(currentProfile);
   const staleOpenRequests = openRequests.filter((request) => {
     const createdAt = request.createdAt ? new Date(request.createdAt).getTime() : Date.now();
     return Date.now() - createdAt > 7 * 24 * 60 * 60 * 1000;
@@ -1828,13 +1827,6 @@ function DashboardView({
   const homesWithoutAvailability = ownedHomes.filter((home) => !allAvailabilities.some((availability) => availability.homeId === home.id));
   const bookedHomes = ownedHomes.filter((home) => getHomeBookingStatus(availabilities.filter((availability) => availability.homeId === home.id), acceptedRequests.filter((request) => request.homeId === home.id)) === "booked");
   const dashboardHints = [
-    {
-      id: "approval",
-      title: "Profilstatus",
-      text: approvalStatus.detail,
-      tone: approvalStatus.tone,
-      value: approvalStatus.label,
-    },
     homesWithoutAvailability.length > 0 && {
       id: "missing-availability",
       title: "Ohne freie Zeiträume",
@@ -1936,17 +1928,19 @@ function DashboardView({
         </div>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {dashboardHints.map((hint) => (
-          <div key={hint.id} className="rounded-lg bg-white p-3 shadow-soft">
-            <div className="flex items-center justify-between gap-3">
-              <strong className="text-sm">{hint.title}</strong>
-              <Pill tone={hint.tone}>{hint.value}</Pill>
+      {dashboardHints.length > 0 && (
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {dashboardHints.map((hint) => (
+            <div key={hint.id} className="rounded-lg bg-white p-3 shadow-soft">
+              <div className="flex items-center justify-between gap-3">
+                <strong className="text-sm">{hint.title}</strong>
+                <Pill tone={hint.tone}>{hint.value}</Pill>
+              </div>
+              <p className="mt-2 text-sm text-[#66756d]">{hint.text}</p>
             </div>
-            <p className="mt-2 text-sm text-[#66756d]">{hint.text}</p>
-          </div>
-        ))}
-      </section>
+          ))}
+        </section>
+      )}
 
       <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-lg bg-white p-4 shadow-soft lg:col-span-2">
@@ -1977,7 +1971,7 @@ function DashboardView({
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {matches.slice(0, 2).map((match) => (
-              <div key={match.id} className="flex flex-col gap-3 rounded-lg border border-[#edf0ea] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div key={match.id} className="flex min-w-0 flex-col gap-3 rounded-lg border border-[#edf0ea] p-3">
                 <div>
                   <Pill tone="green">{match.overlap.days} Tage</Pill>
                   <h3 className="mt-2 font-bold">{match.targetHome.title}</h3>
@@ -1987,7 +1981,7 @@ function DashboardView({
                   </p>
                 </div>
                 <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#e05f4f] px-3 text-sm font-semibold text-white"
+                  className="inline-flex h-8 w-fit items-center justify-center gap-1.5 rounded-lg bg-[#e05f4f] px-2.5 text-xs font-semibold text-white"
                   onClick={() =>
                     onRequest({
                       homeId: match.targetHome.id,
@@ -1998,7 +1992,7 @@ function DashboardView({
                     })
                   }
                 >
-                  <Send size={17} /> Anfrage
+                  <Send size={14} /> Anfrage
                 </button>
               </div>
             ))}
