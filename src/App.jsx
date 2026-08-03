@@ -2173,13 +2173,52 @@ function DiscoverView({
 }
 
 function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) {
-  const [editing, setEditing] = useState(homes[0] ?? { ...blankHouse, id: createId("home"), ownerId: currentProfile.id, managedBy: currentProfile.id });
+  const createHomeDraft = () => ({
+    ...blankHouse,
+    id: createId("home"),
+    ownerId: currentProfile.id,
+    managedBy: currentProfile.id,
+  });
+  const [editing, setEditing] = useState(() => homes[0] ?? createHomeDraft());
+  const [isCreating, setIsCreating] = useState(() => homes.length === 0);
 
   useEffect(() => {
-    if (homes.length && !homes.some((home) => home.id === editing.id)) {
-      setEditing(homes[0]);
+    const refreshedHome = homes.find((home) => home.id === editing.id);
+
+    if (isCreating) {
+      if (refreshedHome) {
+        setEditing(refreshedHome);
+        setIsCreating(false);
+      }
+      return;
     }
-  }, [editing.id, homes]);
+
+    setEditing((current) => {
+      const refreshedHome = homes.find((home) => home.id === current.id);
+      return refreshedHome ?? homes[0] ?? createHomeDraft();
+    });
+  }, [editing.id, homes, isCreating]);
+
+  async function handleSave(home) {
+    await onSave(home);
+    setEditing(home);
+    if (!isCreating) {
+      setIsCreating(false);
+    }
+  }
+
+  async function handleDelete(homeId) {
+    if (isCreating) {
+      setEditing(homes[0] ?? createHomeDraft());
+      setIsCreating(homes.length === 0);
+      return;
+    }
+
+    await onDelete(homeId);
+    const nextHome = homes.find((home) => home.id !== homeId);
+    setEditing(nextHome ?? createHomeDraft());
+    setIsCreating(!nextHome);
+  }
 
   return (
     <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
@@ -2188,23 +2227,47 @@ function MyHomeView({ homes, currentProfile, onSave, onDelete, onUploadPhoto }) 
           <h2 className="text-xl font-bold">Meine Unterkünfte</h2>
           <IconButton
             label="Neue Unterkunft"
-            onClick={() => setEditing({ ...blankHouse, id: createId("home"), ownerId: currentProfile.id, managedBy: currentProfile.id })}
+            onClick={() => {
+              setEditing(createHomeDraft());
+              setIsCreating(true);
+            }}
           >
             <Plus size={18} />
           </IconButton>
         </div>
+        {isCreating && (
+          <div className="rounded-lg border border-[#2d6a62] bg-white p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <strong>Neue Unterkunft</strong>
+                <p className="mt-1 text-sm text-[#66756d]">Fülle rechts die Daten aus und speichere den neuen Eintrag.</p>
+              </div>
+              <Pill tone="green">Neu</Pill>
+            </div>
+          </div>
+        )}
         {homes.map((home) => (
           <button
             key={home.id}
-            className={`w-full rounded-lg border p-3 text-left ${editing.id === home.id ? "border-[#2d6a62] bg-white" : "border-[#ded8cb] bg-white/70"}`}
-            onClick={() => setEditing(home)}
+            className={`w-full rounded-lg border p-3 text-left ${!isCreating && editing.id === home.id ? "border-[#2d6a62] bg-white" : "border-[#ded8cb] bg-white/70"}`}
+            onClick={() => {
+              setEditing(home);
+              setIsCreating(false);
+            }}
           >
             <strong>{home.title || "Neue Unterkunft"}</strong>
             <p className="mt-1 text-sm text-[#66756d]">{home.region || home.city} · {home.city} · bis {home.maxGuests} Gäste</p>
           </button>
         ))}
       </section>
-      <HouseEditor value={editing} onChange={setEditing} onSave={onSave} onDelete={onDelete} onUploadPhoto={onUploadPhoto} />
+      <HouseEditor
+        value={editing}
+        onChange={setEditing}
+        onSave={handleSave}
+        onDelete={handleDelete}
+        onUploadPhoto={onUploadPhoto}
+        isNew={isCreating}
+      />
     </div>
   );
 }
@@ -3288,7 +3351,7 @@ function MapPreview({ home }) {
   );
 }
 
-function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact = false }) {
+function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact = false, isNew = false }) {
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadNote, setUploadNote] = useState("");
@@ -3342,7 +3405,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
 
   return (
     <section className={compact ? "" : "rounded-lg bg-white p-5 shadow-soft"}>
-      {!compact && <h2 className="mb-4 text-xl font-bold">Unterkunft bearbeiten</h2>}
+      {!compact && <h2 className="mb-4 text-xl font-bold">{isNew ? "Neue Unterkunft anlegen" : "Unterkunft bearbeiten"}</h2>}
       <QualityMeter score={homeScore} issues={homeIssues} />
       <div className="grid gap-3 sm:grid-cols-2">
         <FieldControlled label="Titel" value={value.title} onChange={(title) => updateField("title", title)} />
@@ -3511,7 +3574,7 @@ function HouseEditor({ value, onChange, onSave, onDelete, onUploadPhoto, compact
         <button className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#2d6a62] px-4 font-semibold text-white" onClick={() => onSave(value)}>
           <Check size={18} /> Speichern
         </button>
-        {onDelete && (
+        {onDelete && !isNew && (
           <button className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#d8c4bd] bg-white px-4 font-semibold text-[#9f3f34]" onClick={() => onDelete(value.id)}>
             <Trash2 size={18} /> Löschen
           </button>
